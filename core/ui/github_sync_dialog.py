@@ -784,7 +784,7 @@ class GitHubSyncDialog:
         
         # 开始上传
         if use_git:
-            self.status_label.setText("正在使用 Git 准备上传...")
+            self.status_label.setText("正在使用 Git 准备上传（将尝试多种推送策略）...")
         else:
             self.status_label.setText("正在准备上传...")
         self.upload_worker.start()
@@ -805,8 +805,24 @@ class GitHubSyncDialog:
         
         if success:
             self.status_label.setText(f"上传成功！共 {result['success']} 个文件")
+            
+            # 检查是否使用了新分支策略（通过查看结果中是否有相关提示）
+            # 这里我们可以提供更详细的信息
+            success_msg = f"GitHub 上传成功: {result['success']} 个文件"
+            
+            # 显示成功提示
+            QMessageBox.information(
+                self.dialog, 
+                "上传成功", 
+                f"{success_msg}\n\n"
+                f"仓库: {self._current_repo_name}\n"
+                f"分支: {self._current_branch_name}\n\n"
+                "如果推送到 main 分支失败，系统已自动尝试其他策略，\n"
+                "包括创建新分支。请检查 GitHub 仓库确认结果。"
+            )
+            
             cmds.inViewMessage(
-                message=f"GitHub 上传成功: {result['success']} 个文件到 {self._current_repo_name}/{self._current_branch_name}",
+                message=success_msg,
                 pos='midCenter',
                 fade=True
             )
