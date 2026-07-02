@@ -1,0 +1,398 @@
+//--------------------------------------------------------------------------
+//
+// ScriptName : smart PolyBridge
+// Contents   : Poly bridge between two different of edge number loops
+// Author     : Joe Wu
+// URL        : https://www.youtube.com/@Im3dJoe
+// Since      : 2022/03/21
+// Version    : 1.00 public release
+//			  	1.01 bug fix
+//				1.02 fix undo error
+//				1.03 add saw mode
+//				1.04 bug fix 
+//--------------------------------------------------------------------------
+
+global proc smartPolyBridge(){
+    if ((`window -ex smartPolyBridgeUI`) == true) deleteUI smartPolyBridgeUI;
+    string $smartPolyBridgeUI=`window -title "smartPolyBridge v1.04:"  -mnb 0 -mxb 0 -w 340 -h 50 smartPolyBridgeUI` ;
+    columnLayout ;
+    text -l "";
+    rowColumnLayout -nc 4 -cw 1 95 -cw 2 95  -cw 3 5 -cw 4 95;
+    text -l "Bridge";
+    button -l "Min" -c "smartPolyBridgeGo min";
+    text -l "";
+    button -l "Max" -c "smartPolyBridgeGo max";
+    setParent.. ;
+    rowColumnLayout -nc 4 -cw 1 95 -cw 2 95  -cw 3 5 -cw 4 95;
+    text -l "Saw";
+    button -l "Min" -c "smartPolySaw min";
+    text -l "";
+    button -l "Max" -c "smartPolySaw max";
+    setParent.. ;
+    text -l "";
+    showWindow $smartPolyBridgeUI ;
+    }    
+    
+global proc matchEdgeNumber(int $target){
+    string $checkEdges[]=`ls -sl -fl`;
+	select -r $checkEdges;
+	if (`objExists "edgeGepLock"` == 1){delete "edgeGepLock*";}
+	sets -name "edgeGepLock" -text "edgeGepLock";
+	select -r "edgeGepLock";
+	$count = 0;
+	select $checkEdges;
+	smartLP minus;
+	$checkEdges=`ls -sl -fl`;
+	if (`objExists "edgeGepLock"` == 1){delete "edgeGepLock*";}
+	sets -name "edgeGepLock" -text "edgeGepLock";
+	select -r "edgeGepLock";
+	while ((`size$checkEdges`) >  ($target -2) && $count++ < 100){
+		select -r "edgeGepLock";
+		jwShortEdge("min");
+		PolygonCollapseEdges;
+		select -r "edgeGepLock";
+		$checkEdges=`ls -sl -fl`;
+	   }
+	select -r "edgeGepLock";
+	smartLP plus;
+   //evenEdgesAll;
+   if (`objExists "edgeGepLock"` == 1){delete "edgeGepLock*";}
+}
+
+global proc matchEdgeNumberMax(int $target){
+    string $checkEdges[]=`ls -sl -fl`;
+    string $geo[]=`ls -hl`;
+    string $shapenodes[] = `listRelatives -shapes $geo[0]`;
+    select -r $checkEdges;
+    if (`objExists "edgeGepLock"` == 1){delete "edgeGepLock*";}
+    sets -name "edgeGepLock" -text "edgeGepLock";
+    select -r "edgeGepLock";
+    select $checkEdges;
+    //smartLP minus;
+    $checkEdges=`ls -sl -fl`;
+    if (`objExists "edgeGepLock"` == 1){delete "edgeGepLock*";}
+    sets -name "edgeGepLock" -text "edgeGepLock";
+    select -r "edgeGepLock";
+    $count = 0;
+    while ((`size$checkEdges`) <  $target && $count++ < 100){
+        select -r "edgeGepLock";
+        jwShortEdge("max");
+        string $selEdge[]=`ls -sl -fl`;
+        string $temp[];
+        clear $temp;
+        string $tempB[];
+        clear $tempB;
+        tokenize $selEdge[0] "[" $temp;
+        tokenize $temp[1] "]" $tempB;
+        int $eNo = int($tempB[0]);
+        polySplit -ch 0 -s 1 -sma 0 -ief 0 -ep $eNo 0.5 $shapenodes[0];
+        select -r "edgeGepLock";
+        $checkEdges=`ls -sl -fl`;
+        }
+    select -r "edgeGepLock";
+    //smartLP plus;
+    //evenEdgesAll;
+    if (`objExists "edgeGepLock"` == 1){delete "edgeGepLock*";}
+    }
+
+
+global proc smartLP(string $PM){
+    if($PM=="minus"){
+        polySelectConstraint -pp 6 -t 0x8000;
+        resetPolySelectConstraint;
+        }
+    else{//check select edge is a borader edge or inner edge
+        string $selEdge[]=`ls -sl -fl`;
+        polySelectConstraint -m 2 -w 2  -t 0x8000;
+        string $selInner[]=`ls -sl -fl`;
+        select -r  $selEdge;
+        polySelectConstraint -m 2 -w 1  -t 0x8000;
+        string $selBoarder[]=`ls -sl -fl`;
+        if (`size$selInner`>`size$selBoarder`){
+            select -r  $selEdge;
+            polySelectConstraint -pp 5 -t 0x8000;//this is glow on the continue edge
+            resetPolySelectConstraint;
+            }
+        else{
+            select -r  $selEdge;
+            polySelectConstraint -pp 1 -m 2 -w 1 -t 0x8000;// this is glow on the border edge
+            resetPolySelectConstraint;
+            }
+        }
+     }
+
+
+global proc float getEdgeLength(string $edge){
+    select -r $edge;
+    select -r `polyListComponentConversion -tv`;
+    string $connectedVerts[] = `filterExpand -ex 1 -sm 31`;
+    vector $PT1 = `pointPosition -w $connectedVerts[0]`;
+    vector $PT2 = `pointPosition -w $connectedVerts[1]`;
+    float $distance = mag($PT1-$PT2);
+    return $distance;
+}
+
+global proc string[] checkEdgeLoopGrp(){
+    string $edges[]=`filterExpand -ex 1 -sm 32`;
+    string $obj[]=`ls -sl -o`;
+    int $edgeNum[]=`polyEvaluate -edge $obj[0]`;
+    int $isSelect[];
+    int $isProcessed[];
+    string $edgeGroups[];
+    for($i=0;$i<$edgeNum[0];$i++){
+        $isSelect[size($isSelect)] = 0;
+        $isProcessed[size($isProcessed)] = 0;
+    }
+    for($edge in $edges){
+        $currId = int(getComponentId($edge));
+        $isSelect[$currId] = 1;
+    }
+    for($iter=0;$iter<size($edges);$iter++){
+        int $edgeId = getComponentId($edges[$iter]);
+        if($isProcessed[$edgeId])
+            continue;
+        $isProcessed[$edgeId] = 1;
+        string $currEdge = $edges[$iter];
+        string $edgeStack[] = {$currEdge};
+        int $stackSize = 1;
+        string $currEdgeList = "";
+        while($stackSize>0){
+            $currEdge = $edgeStack[$stackSize-1];
+            $edgeStack[$stackSize-1] = "";
+            $stackSize -= 1 ;
+            $currEdgeList = $currEdgeList + $currEdge + ";";
+            select -r $currEdge;
+            PolySelectTraverse 1;
+            select -d $currEdge;
+            string $nEdges[] =`filterExpand -ex 1 -sm 32`;
+            for($nEdge in $nEdges){
+                int $nId = getComponentId($nEdge);
+                if($isProcessed[$nId])
+                    continue;
+                 if (!$isSelect[$nId])
+                    continue;
+                  $isProcessed[$nId] = 1;
+                $edgeStack[$stackSize] = $nEdge;
+                $stackSize+=1;
+            }
+        }
+      $edgeGroups[size($edgeGroups)] = $currEdgeList;
+    }
+     int $edgeGrpNo = `size($edgeGroups)`;
+     string $edgeGrpA = string ($edgeGrpNo);
+     string $returnList[];
+     $returnList[`size$returnList`] = $edgeGrpA;
+     for ($e in $edgeGroups){
+          $returnList[`size$returnList`] = $e;
+     }
+     return $returnList;
+}
+
+global proc int getComponentId(string $component){
+    string $suffix=match("\\[(.)+", $component);
+    int $id=match("[0-9]+", $suffix);
+    return $id;
+    }
+
+global proc jwShortEdge( string $minmax ){ // or longest
+    float $value;
+    if($minmax == "max"){$value=0;}
+    else if($minmax == "min"){$value=10000000000000000000;}
+    string $selection[]=`ls -sl -fl`;
+    string $edges[]= `filterExpand -ex 1 -sm 32`;
+    string $edgeLst[];
+    clear   $edgeLst;
+    string $targetEdge;
+    if (!`size $edges`) error "No valid Edges selected!";
+
+    if($minmax == "max"){
+        for($i=0;$i<`size $edges`;$i++){
+            float $checkEdgeLength = getEdgeLength($edges[$i]);
+                if( $checkEdgeLength > $value){
+                $value = $checkEdgeLength;
+                $targetEdge = $edges[$i];
+                }
+            }
+        }
+    else{
+        for($i=0;$i<`size $edges`;$i++){
+            float $checkEdgeLength = getEdgeLength($edges[$i]);
+                if( $checkEdgeLength < $value){
+                $value = $checkEdgeLength;
+                $targetEdge = $edges[$i];
+                }
+            }
+        }
+    select $targetEdge;
+}
+
+global proc float twoVerticesDistance(string $vertex1, string $vertex2){
+    float $v1[] = `pointPosition $vertex1`;
+    float $v2[] = `pointPosition $vertex2`;
+    float $distance = sqrt(pow(($v1[0] - $v2[0]), 2) + pow(($v1[1] - $v2[1]), 2) + pow(($v1[2] - $v2[2]), 2));
+    return $distance;
+}
+
+
+global proc string[] getE2VOrder(string $edgeLoopList[]){
+    string $cvListA[] = `polyListComponentConversion -fe -tv  $edgeLoopList`;
+    $cvListA = `ls -fl $cvListA`;
+    $findEndCv = "";
+    for ($c in $cvListA){
+        string $checkEdge[] = `polyListComponentConversion -fv -te $c`;
+        $checkEdge = `ls -fl $checkEdge`;
+        string $commonItems[] = stringArrayRemove(stringArrayRemove($checkEdge, $edgeLoopList), $edgeLoopList);
+        
+        if (`size$commonItems` == 1){
+            $findEndCv = $c;
+            break;
+        }
+    }
+    string $findCVOrder[];
+    clear $findCVOrder;
+    $findCVOrder[0] = $findEndCv;
+    string $checkNextEdge[];
+    clear $checkNextEdge;
+    string $findNextEdge[];
+    clear $findNextEdge;
+    string $getDiff[];
+    clear $getDiff;
+    string $diff[];
+    clear $diff;
+    int $count = 0;
+    int $checkNo = 0;
+    while (`size$findCVOrder` != `size$cvListA` && $count++ < 100){
+        $checkNo =`size$findCVOrder`-1;
+        $checkNextEdge = `polyListComponentConversion -fv -te $findCVOrder[$checkNo]`;   
+        $checkNextEdge = `ls -fl $checkNextEdge`; 
+        $findNextEdge = stringArrayRemove(stringArrayRemove($checkNextEdge, $edgeLoopList), $edgeLoopList);
+        $getDiff = stringArrayRemove($findNextEdge, $edgeLoopList);
+        $edgeLoopList = $getDiff;
+        $checkNextCV = `polyListComponentConversion -fe -tv $findNextEdge[0]`;
+        $checkNextCV =`ls -fl $checkNextCV`; 
+        $diff = stringArrayRemove($findCVOrder, $checkNextCV);
+        $findCVOrder[`size$findCVOrder`] =  $diff[0] ;
+        }
+    return $findCVOrder;
+}
+
+global proc string[] revArray( string $array[] ){
+    string $reversedArray[];
+    int $arraySize = `size $array`;
+    for( $a = 0; $a < `size $array`; $a++ ) {
+    $reversedArray[( $arraySize - 1 - $a )] = $array[$a];
+    }
+    return $reversedArray;
+    }
+
+
+global proc smartPolyBridgeGo(string $type){
+    BakeNonDefHistory;
+    undoInfo -ock ;
+    if (`objExists edgeLoopA` == 1){delete "edgeLoopA*";}
+    if (`objExists edgeLoopB` == 1){delete "edgeLoopB*";}
+    string $checkEdgeGrps[] = `checkEdgeLoopGrp`;
+    if ($checkEdgeGrps[0] == "2"){
+         string $tokensA[];
+         int $numTokensA = tokenize($checkEdgeGrps[1],";",$tokensA);
+         select -r $tokensA;
+         string $fristEdge[]=`ls -sl -fl`;
+         sets -name "edgeLoopA" -text "edgeLoopA";
+         string $tokensB[];
+         int $numTokensB = tokenize($checkEdgeGrps[2],";",$tokensB);
+         select -r $tokensB;
+         string $secEdge[]=`ls -sl -fl`;
+         sets -name "edgeLoopB" -text "edgeLoopB";
+        if ($type == "max"){
+            if (`size$fristEdge` >`size$secEdge`){
+                select -r $secEdge;
+                matchEdgeNumberMax(`size$fristEdge`);
+                 }
+            else{
+                select -r $fristEdge;
+                matchEdgeNumberMax(`size$secEdge`);
+                }
+			}
+        else{
+             if (`size$fristEdge` >`size$secEdge`){
+                    select -r $fristEdge;
+                    matchEdgeNumber (`size$secEdge`);
+                    }
+                else {
+                    select -r $secEdge;
+                    matchEdgeNumber (`size$fristEdge`);
+                    }
+            }
+        select -r edgeLoopB edgeLoopA;
+        polyBridgeEdge -ch 0 -divisions 0 -twist 0 -taper 1 -curveType 0 -smoothingAngle 30;
+        //BakeNonDefHistory;
+        if (`objExists edgeLoopA` == 1){delete "edgeLoopA*";}
+        if (`objExists edgeLoopB` == 1){delete "edgeLoopB*";}
+        }
+    undoInfo -cck;
+    }
+
+global proc smartPolySaw(string $type){
+    BakeNonDefHistory;
+    undoInfo -ock ;
+    if (`objExists edgeLoopA` == 1){delete "edgeLoopA*";}
+    if (`objExists edgeLoopB` == 1){delete "edgeLoopB*";}
+    string $checkEdgeGrps[] = `checkEdgeLoopGrp`;
+    if ($checkEdgeGrps[0] == "2"){
+         string $tokensA[];
+         int $numTokensA = tokenize($checkEdgeGrps[1],";",$tokensA);
+         select -r $tokensA;
+         string $fristEdge[]=`ls -sl -fl`;
+         sets -name "edgeLoopA" -text "edgeLoopA";
+         string $tokensB[];
+         int $numTokensB = tokenize($checkEdgeGrps[2],";",$tokensB);
+         select -r $tokensB;
+         string $secEdge[]=`ls -sl -fl`;
+         sets -name "edgeLoopB" -text "edgeLoopB";
+        if (`size$fristEdge` <`size$secEdge`){
+            select -r $fristEdge;
+            matchEdgeNumberMax (`size$secEdge`);
+  
+            }
+        else if(`size$fristEdge` >`size$secEdge`){
+            select -r $secEdge;
+            matchEdgeNumberMax (`size$fristEdge`);
+            }
+        string $edgeLoopAList[] = `sets -q "edgeLoopA" `; 
+        string $edgeLoopBList[] = `sets -q "edgeLoopB" `;
+        //check ends
+        $edgeLoopAList = `ls -fl $edgeLoopAList`;
+        string $loopACvOrder[] = `getE2VOrder($edgeLoopAList)`;
+        
+        $edgeLoopBList = `ls -fl $edgeLoopBList`;
+        string $loopBCvOrder[] = `getE2VOrder($edgeLoopBList)`;
+        //compare distance
+        float $lengthA = twoVerticesDistance($loopACvOrder[0], $loopBCvOrder[0]);
+        float $lengthB = twoVerticesDistance($loopACvOrder[0], $loopBCvOrder[`size$loopBCvOrder`-1]);
+        if ($lengthA > $lengthB){
+            string $reList[]=`revArray $loopBCvOrder`;
+             $loopBCvOrder = $reList;
+        }
+
+        if ($type == "min"){
+            for($a=0; $a<size($loopACvOrder); $a++) {
+                float $posi[] = `pointPosition $loopACvOrder[$a]`;
+                move  -wd $posi[0] $posi[1] $posi[2]  $loopBCvOrder[$a];
+                }
+            }    
+        else{
+            for($b=0; $b<size($loopBCvOrder); $b++) {
+                float $posi[] = `pointPosition $loopBCvOrder[$b]`;
+                move  -wd $posi[0] $posi[1] $posi[2] $loopACvOrder[$b];
+                }
+            }
+        select  $loopACvOrder  $loopBCvOrder;
+        polyMergeVertex  -d 0.001 -am 1 -ch 0;
+        //BakeNonDefHistory;
+        if (`objExists edgeLoopA` == 1){delete "edgeLoopA*";}
+        if (`objExists edgeLoopB` == 1){delete "edgeLoopB*";}
+        }
+    undoInfo -cck;
+    }
+
+smartPolyBridge();
