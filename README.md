@@ -1,2 +1,2 @@
-# scripts-box-20260702
+# scripts-box
 Maya scripts repository
