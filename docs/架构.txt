@@ -1,0 +1,28 @@
+scripts box
+├── install_scripts_box.py  # 安装脚本
+├── core/                       # 主程序与配置
+│   ├── __init__.py
+│   ├── scripts_box.py          # 主窗口入口
+│   ├── config.json
+│   ├── groups_order.json
+│   ├── settings.json
+│   └── pinned.json
+├── tools/                      # 工具脚本（原 tool/，建议改名 tools/）
+│   ├── BS/
+│   ├── cktool/
+│   ├── ng/
+│   ├── 动力学骨/
+│   ├── 动画小工具/
+│   ├── 导入导出/
+│   ├── 常用/
+│   ├── 曲线工具/
+│   ├── 权重/
+│   └── 杂/
+├── resources/                  # 图标、图片等静态资源
+│   └── icons/
+├── vendor/                     # 第三方依赖
+│   └── ffmpeg/
+├── docs/                       # 说明文档、教程视频
+│   ├── README.md
+│   └── videos/
+└── .gitignore                  # 忽略 pycache/、*.pyc、临时文件
