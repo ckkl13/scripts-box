@@ -1,0 +1,161 @@
+/*--------------------------------------------------------------------------
+## ScriptName : edge loop to panel line 
+## Contents   : covert selected edge loop to gap 
+## Author     : Joe Wu
+## URL        : http://im3djoe.com
+## Since      : 2021/05
+## LastUpdate : 2021/05/11
+## Version    : 1.0  First version for public test
+##  			1.01  bug fix missing function
+##				1.02  bug fix bug when model has a hole + add offset slider
+## Install    : copy and paste script into a Mel tab in maya script editor then Run
+##--------------------------------------------------------------------------
+*/
+
+global proc edge2PanelUI(){
+	if ((`window -ex panelLine_UI`) == true) deleteUI panelLine_UI;
+	$panelLine_UI = `window  -title "Edge Loop to Panel Line v1.02" -w 450 -h 150 -menuBar 0 -sizeable 1 -toolbox 1  panelLine_UI`;
+	columnLayout -cat "both" 5 -cw 450; 
+	text -l "";
+	floatSliderGrp   -v 0.05 -min 0.01 -max 1 -s 0.01 -fmx 10 -cw3 60 40 0  -label "Width   " -field true -dc " " widthUpdateSlider;
+	floatSliderGrp   -v -0.05 -min -1 -max 1  -fmn -10  -fmx 10 -s 0.01 -cw3 60 40 0  -label "Depth   " -field true  depthUpdateSlider;
+	floatSliderGrp   -v 0 -min -0.1 -max 0.1  -fmn -10  -fmx 10 -s 0.01 -cw3 60 40 0  -label "Offset   " -field true  offsetUpdateSlider;
+	text -l "";
+	rowColumnLayout -nc 4 -cw 1 60 -cw 2 200 -cw 3 10 -cw 4 100 ;
+	text -l "";
+	button -label "Edge Loop to Panel Line"  -h 23 -c "edge2Panel"; 
+	text -l "";
+	button -label "Reset"  -h 23 -c "edge2PanelReset"; 
+	setParent ..;
+	showWindow panelLine_UI;
+	}
+
+global proc edge2PanelReset(){
+    connectControl  widthUpdateSlider "";     
+    connectControl  depthUpdateSlider "";   
+    connectControl  depthUpdateSlider "";           
+    floatSliderGrp -e -en 1 -v 0.05 widthUpdateSlider;
+    floatSliderGrp -e -en 1 -v -0.05 depthUpdateSlider;
+    floatSliderGrp -e -en 1 -v 0 offsetUpdateSlider;
+    }
+
+global proc vector translatePolyInfoNormal( string $pin ){
+  vector $normal;
+  float $x;
+  float $y;
+  float $z;
+  string $tokens[];
+  int $numTokens = `tokenize $pin " " $tokens`;
+  if ( ( $numTokens > 3 ) && ( $tokens[0] == "FACE_NORMAL" ) ) {
+    $x = ($tokens[$numTokens-3]);
+    $y = ($tokens[$numTokens-2]);
+    $z = ($tokens[$numTokens-1]);
+    $normal = << $x, $y, $z >>;
+    $normal = `unit $normal`;
+  }
+  return $normal;
+}
+global proc edge2Panel(){
+	if(`objExists "saveCV"`){ delete "saveCV";}
+	if(`objExists "saveTri"`){ delete "saveTri";}
+	if(`objExists "preHoleEdges"`){ delete "preHoleEdges";}
+	float $widthV = `floatSliderGrp -q -v widthUpdateSlider`;
+	float $depthV = `floatSliderGrp -q -v depthUpdateSlider`;
+	float $offsetV = `floatSliderGrp -q -v offsetUpdateSlider`;
+	if ($widthV == 0){
+		$widthV  = 0.01;
+		}
+	if ($depthV == 0){
+		$depthV  = 0.01;
+		}
+	string $selEdge[]=`ls -sl -fl`;
+	string $geo[]=`ls -hl`;
+	delete -ch $geo;
+	sets -name "saveCV" -text "saveCV" ($geo[0]+".vtx[*]");
+	
+    polySelectConstraint -mode 3 -type 0x8000 -where 1;
+    string $preHoleEdge[] = `ls -sl`;
+    polySelectConstraint -disable;
+	sets -name "preHoleEdges" -text "preHoleEdges";
+	select -r $selEdge;
+	string $bevelNode[] = `polyBevel3 -fraction 0.01 -offsetAsFraction 1 -autoFit 1 -depth 0.1 -mitering 0 -miterAlong 0 -chamfer 1 -segments 1 -worldSpace 1 -smoothingAngle 30 -subdivideNgons 1 -mergeVertices 1 -mergeVertexTolerance 0.0001 -miteringAngle 180 -angleTolerance 180 -ch 1`;
+	select saveCV;
+	InvertSelection;
+	PolySelectConvert 10;
+	string $newList[] = `ls -sl -fl`;
+	polySelectConstraint -sz 1 -m 2 -t 0x0008;
+	resetPolySelectConstraint;
+	string $triList[] = `ls -sl -fl`;
+	select $newList;
+	select -d $triList;
+	ConvertSelectionToVertices;
+	PolySelectConvert 10;
+	string $extFaceList[]=`ls -sl -fl`;
+	select $triList;
+	select -d $extFaceList;
+	sets -name "saveTri" -text "saveTri";
+	select $extFaceList;
+	string $extNode[]  = `polyExtrudeFacet -constructionHistory 1 -keepFacesTogether 1  -divisions 1 -twist 0 -taper 1 -off 0 -thickness -0.01 -smoothingAngle 30`; 
+	select saveTri;
+	string $checkTriAngles[]=`ls -sl -fl`;
+	string $quadFace[];
+	clear $quadFace;
+	ConvertSelectionToEdges;
+	ConvertSelectionToFaces;
+	string $getTriNFace[]=`ls -sl -fl`;
+	for ($c in $checkTriAngles){
+		select $c;
+		ConvertSelectionToEdges;
+		ConvertSelectionToFaces;
+		string $getTriNFace[]=`ls -sl -fl`;
+		polySelectConstraint  -sz 2 -m 2 -t 0x0008;
+		resetPolySelectConstraint;
+		string $quadFromTri[]=`ls -sl -fl`;
+		$stringFaceNormalA = `polyInfo -faceNormals $quadFromTri[0]`;
+		$faceNormalF1 = `translatePolyInfoNormal($stringFaceNormalA[0])`;
+		$stringFaceNormalB = `polyInfo -faceNormals $c`;
+		$faceNormalF2 = `translatePolyInfoNormal($stringFaceNormalB[0])`;
+		$angleBetweenTwo = eval("angleBetween -euler -v1 " + $faceNormalF1.x + " " + $faceNormalF1.y + " " + $faceNormalF1.z + " " + " -v2 " + $faceNormalF2.x + " " + $faceNormalF2.y + " " + $faceNormalF2.z );
+		float $cal = ($angleBetweenTwo[0]+ $angleBetweenTwo[1] + $angleBetweenTwo[2])*($angleBetweenTwo[0]+ $angleBetweenTwo[1] + $angleBetweenTwo[2]);
+		$cmd = "sqrt(" +  $cal +  ");";
+		float $twoFaceAngle = eval($cmd);
+		print  $twoFaceAngle;
+		if ($twoFaceAngle > 10 && $twoFaceAngle < 170 ){
+			$quadFace[`size$quadFace`] = $quadFromTri[0];
+			}
+		}
+	select $getTriNFace;
+	if (`size$quadFace` > 0){
+		select -d $quadFace;
+		}
+	doDelete;
+	select $geo;
+    polySelectConstraint -mode 3 -type 0x8000 -where 1;
+    string $selectedEdge[] = `ls -sl`;
+    polySelectConstraint -disable;
+    select -d "preHoleEdges";
+	FillHole;
+	doMenuComponentSelectionExt($geo[0], "edge", 0);
+	ConvertSelectionToVertices;
+	PolySelectConvert 10;
+	string $checkSel[]=`ls -sl -fl`;
+	if (`size$checkSel` > 0){
+		polyTriangulate -ch 1;
+		polyQuad  -a 30 -kgb 1 -ktb 1 -khe 1 -ws 1 -ch 1;
+		}
+	delete "saveTri" "saveCV";
+	select $geo;
+	connectControl widthUpdateSlider ($bevelNode[0]+".fraction");
+	connectControl depthUpdateSlider ($extNode[0]+".thickness");
+	connectControl offsetUpdateSlider ($extNode[0]+".offset");
+	setAttr ($bevelNode[0]+".fraction")  $widthV;
+	setAttr ($extNode[0]+".thickness")  $depthV;
+	setAttr ($extNode[0]+".offset")  $offsetV;
+	floatSliderGrp -e  -v  $widthV  widthUpdateSlider;
+	floatSliderGrp -e  -v $depthV depthUpdateSlider;
+	floatSliderGrp -e  -v $offsetV offsetUpdateSlider;
+}
+
+
+
+edge2PanelUI;
