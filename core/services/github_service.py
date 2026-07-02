@@ -519,20 +519,38 @@ class GitHubService:
                 
                 # 推送
                 print("正在推送到 GitHub...")
-                try:
-                    self._run_git_command(
-                        ["push", "-u", "origin", branch],
-                        cwd=temp_dir,
-                        auth_header=auth_header
-                    )
-                except subprocess.CalledProcessError as exc:
-                    print("首次推送失败，尝试强制推送...")
-                    print(self._format_git_error(exc))
-                    self._run_git_command(
-                        ["push", "-u", "-f", "origin", branch],
-                        cwd=temp_dir,
-                        auth_header=auth_header
-                    )
+                push_strategies = [
+                    ("普通推送", ["push", "-u", "origin", branch]),
+                    ("拉取后推送", lambda: self._pull_and_push(temp_dir, auth_header, branch)),
+                    ("创建新分支", lambda: self._create_and_push_new_branch(temp_dir, auth_header, branch)),
+                    ("强制推送", ["push", "-u", "-f", "origin", branch])
+                ]
+                
+                push_success = False
+                last_error = None
+                
+                for strategy_name, strategy in push_strategies:
+                    try:
+                        print(f"尝试策略: {strategy_name}")
+                        if callable(strategy):
+                            strategy()
+                        else:
+                            self._run_git_command(
+                                strategy,
+                                cwd=temp_dir,
+                                auth_header=auth_header
+                            )
+                        push_success = True
+                        print(f"策略 {strategy_name} 成功！")
+                        break
+                    except subprocess.CalledProcessError as exc:
+                        last_error = exc
+                        print(f"策略 {strategy_name} 失败: {self._format_git_error(exc)}")
+                        continue
+                
+                if not push_success:
+                    raise last_error or Exception("所有推送策略均失败")
+                
                 print("推送成功！")
                 
             except subprocess.CalledProcessError as e:
@@ -561,6 +579,33 @@ class GitHubService:
             "failed": failed,
             "failed_files": failed_files
         }
+    
+    def _pull_and_push(self, temp_dir, auth_header, branch):
+        """先拉取远程变更再推送"""
+        print("正在拉取远程变更...")
+        try:
+            self._run_git_command(["pull", "--rebase", "origin", branch], cwd=temp_dir, auth_header=auth_header)
+        except subprocess.CalledProcessError:
+            print("拉取失败，尝试重置到远程分支状态...")
+            self._run_git_command(["reset", "--hard", f"origin/{branch}"], cwd=temp_dir, auth_header=auth_header)
+            # 重新应用我们的变更
+            self._run_git_command(["cherry-pick", "HEAD"], cwd=temp_dir, auth_header=auth_header)
+        
+        print("拉取完成，正在推送...")
+        self._run_git_command(["push", "-u", "origin", branch], cwd=temp_dir, auth_header=auth_header)
+    
+    def _create_and_push_new_branch(self, temp_dir, auth_header, base_branch):
+        """
+        创建新分支并推送，用于绕过分支保护规则
+        """
+        import datetime
+        date_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_branch = f"update-{date_str}"
+        
+        print(f"创建新分支: {new_branch}")
+        self._run_git_command(["checkout", "-b", new_branch], cwd=temp_dir, auth_header=auth_header)
+        self._run_git_command(["push", "-u", "origin", new_branch], cwd=temp_dir, auth_header=auth_header)
+        print(f"新分支 {new_branch} 已推送，请在 GitHub 上创建 Pull Request 合并到 {base_branch}")
 
     def _run_git_command(self, args, cwd=None, auth_header=None):
         """运行带认证头的 Git 命令。"""
