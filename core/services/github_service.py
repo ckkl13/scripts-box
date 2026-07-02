@@ -426,21 +426,30 @@ class GitHubService:
             
             repo_url = f"https://{self.token}@github.com/{self.repo_owner}/{repo_name}.git"
             
+            # 首先确保仓库存在
+            if not self.repo_exists(repo_name):
+                print(f"仓库 {repo_name} 不存在，正在创建...")
+                if not self.create_repo(repo_name):
+                    print("创建仓库失败，回退到 API 上传方式")
+                    return self.upload_files(repo_name, files_info, branch)
+            
             # 克隆仓库
             print(f"正在克隆仓库: {repo_name}")
+            repo_cloned = False
             try:
                 subprocess.check_output(
                     ["git", "clone", "--depth", "1", "-b", branch, repo_url, temp_dir],
                     stderr=subprocess.STDOUT
                 )
+                repo_cloned = True
             except subprocess.CalledProcessError:
-                # 如果分支不存在，尝试创建新仓库或使用 main
+                # 尝试用默认分支克隆
                 try:
-                    # 尝试用默认分支克隆
                     subprocess.check_output(
                         ["git", "clone", "--depth", "1", repo_url, temp_dir],
                         stderr=subprocess.STDOUT
                     )
+                    repo_cloned = True
                     # 切换到目标分支或创建新分支
                     os.chdir(temp_dir)
                     try:
@@ -448,16 +457,13 @@ class GitHubService:
                     except subprocess.CalledProcessError:
                         subprocess.check_output(["git", "checkout", "-b", branch], stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError:
-                    # 如果仓库不存在，初始化新仓库
-                    print(f"仓库不存在，正在初始化新仓库: {repo_name}")
-                    os.chdir(temp_dir)
-                    subprocess.check_output(["git", "init"], stderr=subprocess.STDOUT)
-                    subprocess.check_output(["git", "checkout", "-b", branch], stderr=subprocess.STDOUT)
-                    
-                    # 创建 README
-                    with open("README.md", "w", encoding="utf-8") as f:
-                        f.write(f"# {repo_name}\n\nMaya scripts repository\n")
-            else:
+                    print(f"克隆仓库失败，回退到 API 方式")
+                    return self.upload_files(repo_name, files_info, branch)
+            
+            if not repo_cloned:
+                return self.upload_files(repo_name, files_info, branch)
+            
+            if repo_cloned and not os.getcwd() == temp_dir:
                 os.chdir(temp_dir)
             
             # 复制文件
@@ -479,23 +485,43 @@ class GitHubService:
                 date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 commit_msg = f"Update {date_str} from Maya Scripts Box"
                 
-                subprocess.check_output(["git", "add", "-A"], stderr=subprocess.STDOUT)
-                subprocess.check_output(["git", "config", "user.name", "Maya Scripts Box"], stderr=subprocess.STDOUT)
-                subprocess.check_output(["git", "config", "user.email", "maya@scripts.box"], stderr=subprocess.STDOUT)
-                subprocess.check_output(["git", "commit", "-m", commit_msg], stderr=subprocess.STDOUT)
+                # 检查是否有变更
+                status_result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+                if not status_result.stdout.strip():
+                    print("没有文件变更，跳过提交")
+                else:
+                    subprocess.check_output(["git", "add", "-A"], stderr=subprocess.STDOUT)
+                    subprocess.check_output(["git", "config", "user.name", "Maya Scripts Box"], stderr=subprocess.STDOUT)
+                    subprocess.check_output(["git", "config", "user.email", "maya@scripts.box"], stderr=subprocess.STDOUT)
+                    subprocess.check_output(["git", "commit", "-m", commit_msg], stderr=subprocess.STDOUT)
                 
-                # 设置远程仓库并推送
+                # 确保远程仓库正确
                 try:
-                    subprocess.check_output(["git", "remote", "add", "origin", repo_url], stderr=subprocess.STDOUT)
+                    # 先检查是否已有 origin
+                    remote_result = subprocess.run(["git", "remote"], capture_output=True, text=True)
+                    if "origin" not in remote_result.stdout:
+                        subprocess.check_output(["git", "remote", "add", "origin", repo_url], stderr=subprocess.STDOUT)
+                    else:
+                        # 更新远程 URL
+                        subprocess.check_output(["git", "remote", "set-url", "origin", repo_url], stderr=subprocess.STDOUT)
                 except subprocess.CalledProcessError:
-                    pass  # 远程已存在
+                    pass
                 
                 # 推送
                 print("正在推送到 GitHub...")
-                subprocess.check_output(
-                    ["git", "push", "-u", "origin", branch],
-                    stderr=subprocess.STDOUT
-                )
+                # 使用 --force-with-lease 更安全
+                try:
+                    subprocess.check_output(
+                        ["git", "push", "-u", "origin", branch],
+                        stderr=subprocess.STDOUT
+                    )
+                except subprocess.CalledProcessError:
+                    # 如果推送失败，尝试强制推送
+                    print("首次推送失败，尝试强制推送...")
+                    subprocess.check_output(
+                        ["git", "push", "-u", "-f", "origin", branch],
+                        stderr=subprocess.STDOUT
+                    )
                 print("推送成功！")
                 
             except subprocess.CalledProcessError as e:
@@ -506,6 +532,8 @@ class GitHubService:
                 
         except Exception as e:
             print(f"Git 上传方式失败: {e}")
+            import traceback
+            traceback.print_exc()
             # 回退到 API 方式
             print("回退到 API 上传方式...")
             return self.upload_files(repo_name, files_info, branch)
