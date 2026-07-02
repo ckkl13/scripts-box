@@ -1,0 +1,142 @@
+//--------------------------------------------------------------------------
+//
+// ScriptName : linkGen
+// Contents   : create curve connect to two objects with open hole
+// Author     : Joe Wu
+// URL        : https://www.youtube.com/@Im3dJoe
+// LastUpdate : 2022/03/15
+// Version    : 1.0  First version for public test
+// Install    :
+//              copy and paste entire code to a Mel script editor
+//              run it.
+// limitation : object need to have only one open hole	
+
+
+global proc linkGen(){
+    string $mayaVer = `about -v`; // string $mayaVer = `about -version`;
+    int $sweepOn = 0;
+    if (int($mayaVer) > 2021){
+        $checkPlugin = `pluginInfo -query -l "sweep"`;
+        if ($checkPlugin  == 0){
+            loadPlugin "sweep";
+            
+        }
+     $sweepOn = 1;
+    }
+    
+    if ((`window -ex startUI`) == true) deleteUI startUI;
+    string $start=`window -title "linkGen v1.0:"  -w 340 -h 50 startUI` ;
+
+    columnLayout ;
+    text -l "";
+    intSliderGrp -cw3 45 50 200 -label "CVs" -cc "" -f 1 -v 2 -min 2 -max 5 -fmx 50 cableConnectCVs;
+    intSliderGrp -cw3 45 50 200 -label "Handle" -cc "" -f 1 -v 1 -min 2 -max 20 -fmx 500 cableConnectHandle;
+    setParent.. ;
+    rowColumnLayout -nc 4 -cw 1 30 -cw 2 100 -cw 3 20 -cw 4 170 ;
+    text -l "";
+    if  ($sweepOn  == 1){
+        checkBox -label "Sweep" -value 0 sweepCheck;
+    }
+    else{
+        text -l "";
+    }
+    text -l "";
+    button -label "connect"  -c "cableTipConnect"  ;
+    text -l "";
+    setParent.. ;
+    showWindow $start ;
+}
+
+
+global proc cableTipConnect(){ //random cable end collection
+    global string $gMove;
+    setToolTo $gMove;
+    int $cableCV = `intSliderGrp -q -v cableConnectCVs`;
+    int $handleOffset = `intSliderGrp -q -v cableConnectHandle`;
+    int $sweepExist = `checkBox -q -ex "sweepCheck"`;
+    int $sweepCheck;
+    if ($sweepExist == 1){
+        $sweepCheck = `checkBox -q -value sweepCheck`;
+        }
+    else{
+        $sweepCheck = 0;
+    }
+    string $selGeo[]=`ls -sl -fl`;
+    if (`size$selGeo` > 1){
+    for ($s in $selGeo){
+        select $s;
+        polySelectConstraint -mode 3 -type 0x8000 -where 1;
+        string $selectedEdge[] = `ls -sl`;
+        polySelectConstraint -disable;
+        string $selCurves[]=`ls -sl -fl`;
+        polyCloseBorder -ch 0;
+        PolySelectConvert 10;
+        string $selFace[]=`ls -sl -fl`;
+        $newD = `duplicate -rr $s`;
+        rename $newD[0] ($s + "_end1");
+        $endFace = `substitute $s $selFace[0]  ($s + "_end1")`;
+        select $endFace;
+        InvertSelection;
+        delete;
+        delete $selFace;
+    }        
+    string $endCollection[] = `ls "*_end1"` ;
+    string $cableList[];
+    clear  $cableList;
+    int $count = 0;
+    while( size($endCollection) > 1 && $count++ < 100){
+        string $getTwo[];
+        clear $getTwo;
+        int $rand = rand(0,`size$endCollection`);
+        $getTwo[`size$getTwo`] = $endCollection[$rand];
+        string $diff[] = stringArrayRemove($getTwo , $endCollection);
+        $endCollection = $diff;
+        int $rand = rand(0,`size$endCollection`);
+        $getTwo[`size$getTwo`] = $endCollection[$rand];
+        string $diff[] = stringArrayRemove($getTwo , $endCollection);
+        $endCollection = $diff;
+
+        polyExtrudeFacet -constructionHistory 0 -keepFacesTogether 1 -divisions 1 -twist 0 -taper 1 -off 0 -thickness $handleOffset -smoothingAngle 30 $getTwo[0];
+        select ($getTwo[0] + ".f[1]");
+        float $startA[] = `manipMoveContext -q -p "Move"`;
+        select ($getTwo[0] + ".f[0]");
+        float $handleA[] = `manipMoveContext -q -p "Move"`;
+
+       
+        polyExtrudeFacet -constructionHistory 0 -keepFacesTogether 1 -divisions 1 -twist 0 -taper 1 -off 0 -thickness $handleOffset -smoothingAngle 30 $getTwo[1];
+        select ($getTwo[1] + ".f[1]");
+        float $startB[] = `manipMoveContext -q -p "Move"`;
+        select ($getTwo[1] + ".f[0]");
+        float $handleB[] = `manipMoveContext -q -p "Move"`;
+
+        curve -d 1 -p $startA[0] $startA[1] $startA[2] -p $startB[0] $startB[1] $startB[2] -k 0 -k 1 ;
+        nurbsCurveToBezier;
+        rename "cableCurve01";
+        string $newCableName[]=`ls -sl -fl`;
+        move -a -ws $handleA[0] $handleA[1] $handleA[2] ($newCableName[0]+".cv[1]");
+        move -a -ws $handleB[0] $handleB[1] $handleB[2] ($newCableName[0]+".cv[2]");
+        $cableList[`size$cableList`] = $newCableName[0];
+        }
+    
+    delete "*_end*";
+    $cvSpace = 1.0 / ($cableCV-1) ;
+    if ($cableCV > 2){
+        for ($c in $cableList){
+            for($i= 1 ;$i < ($cableCV-1) ; $i++){
+                insertKnotCurve -ch 1 -cos on -nk 1 -add 1 -ib 0 -rpo 1  ($c + ".u[ " +  $cvSpace * $i + "]");
+            }
+        }
+    }
+    if ($sweepCheck == 1){
+         select $cableList;
+        sweepMeshFromCurve -oneNodePerCurve 0;
+        string $sweepNode[]=`ls -sl -fl`;
+        setAttr ($sweepNode[0]+ ".interpolationOptimize") 1;
+        setAttr ($sweepNode[0]+".interpolationPrecision") 50;
+    }
+    else{
+        select $cableList;
+    }
+}
+}
+linkGen();
