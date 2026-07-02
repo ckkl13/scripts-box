@@ -40,6 +40,13 @@ else:
     raise ImportError("需要安装 requests 库才能使用 GitHub 同步功能")
 
 
+def build_git_basic_auth_header(token):
+    """构建 Git HTTPS 认证头，避免将 token 直接拼进 URL。"""
+    credentials = f"x-access-token:{token}".encode("utf-8")
+    encoded = base64.b64encode(credentials).decode("ascii")
+    return f"AUTHORIZATION: basic {encoded}"
+
+
 class GitHubService:
     """GitHub 同步服务"""
     
@@ -412,6 +419,7 @@ class GitHubService:
         success = 0
         failed = 0
         failed_files = []
+        original_cwd = os.getcwd()
         
         # 创建临时目录
         temp_dir = tempfile.mkdtemp(prefix="maya_scripts_sync_")
@@ -424,7 +432,8 @@ class GitHubService:
                 print("Git 不可用，回退到 API 上传方式")
                 return self.upload_files(repo_name, files_info, branch)
             
-            repo_url = f"https://{self.token}@github.com/{self.repo_owner}/{repo_name}.git"
+            repo_url = f"https://github.com/{self.repo_owner}/{repo_name}.git"
+            auth_header = build_git_basic_auth_header(self.token)
             
             # 首先确保仓库存在
             if not self.repo_exists(repo_name):
@@ -437,17 +446,17 @@ class GitHubService:
             print(f"正在克隆仓库: {repo_name}")
             repo_cloned = False
             try:
-                subprocess.check_output(
-                    ["git", "clone", "--depth", "1", "-b", branch, repo_url, temp_dir],
-                    stderr=subprocess.STDOUT
+                self._run_git_command(
+                    ["clone", "--depth", "1", "-b", branch, repo_url, temp_dir],
+                    auth_header=auth_header
                 )
                 repo_cloned = True
             except subprocess.CalledProcessError:
                 # 尝试用默认分支克隆
                 try:
-                    subprocess.check_output(
-                        ["git", "clone", "--depth", "1", repo_url, temp_dir],
-                        stderr=subprocess.STDOUT
+                    self._run_git_command(
+                        ["clone", "--depth", "1", repo_url, temp_dir],
+                        auth_header=auth_header
                     )
                     repo_cloned = True
                     # 切换到目标分支或创建新分支
@@ -456,8 +465,9 @@ class GitHubService:
                         subprocess.check_output(["git", "checkout", branch], stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError:
                         subprocess.check_output(["git", "checkout", "-b", branch], stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError:
-                    print(f"克隆仓库失败，回退到 API 方式")
+                except subprocess.CalledProcessError as exc:
+                    print(f"克隆仓库失败: {self._format_git_error(exc)}")
+                    print("回退到 API 方式")
                     return self.upload_files(repo_name, files_info, branch)
             
             if not repo_cloned:
@@ -509,23 +519,24 @@ class GitHubService:
                 
                 # 推送
                 print("正在推送到 GitHub...")
-                # 使用 --force-with-lease 更安全
                 try:
-                    subprocess.check_output(
-                        ["git", "push", "-u", "origin", branch],
-                        stderr=subprocess.STDOUT
+                    self._run_git_command(
+                        ["push", "-u", "origin", branch],
+                        cwd=temp_dir,
+                        auth_header=auth_header
                     )
-                except subprocess.CalledProcessError:
-                    # 如果推送失败，尝试强制推送
+                except subprocess.CalledProcessError as exc:
                     print("首次推送失败，尝试强制推送...")
-                    subprocess.check_output(
-                        ["git", "push", "-u", "-f", "origin", branch],
-                        stderr=subprocess.STDOUT
+                    print(self._format_git_error(exc))
+                    self._run_git_command(
+                        ["push", "-u", "-f", "origin", branch],
+                        cwd=temp_dir,
+                        auth_header=auth_header
                     )
                 print("推送成功！")
                 
             except subprocess.CalledProcessError as e:
-                print(f"Git 操作失败: {e}")
+                print(f"Git 操作失败: {self._format_git_error(e)}")
                 # 回退到 API 方式
                 print("回退到 API 上传方式...")
                 return self.upload_files(repo_name, files_info, branch)
@@ -540,7 +551,7 @@ class GitHubService:
         finally:
             # 清理临时目录
             try:
-                os.chdir(os.path.dirname(temp_dir))
+                os.chdir(original_cwd)
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception:
                 pass
@@ -550,3 +561,20 @@ class GitHubService:
             "failed": failed,
             "failed_files": failed_files
         }
+
+    def _run_git_command(self, args, cwd=None, auth_header=None):
+        """运行带认证头的 Git 命令。"""
+        command = ["git"]
+        if auth_header:
+            command.extend(["-c", f"http.extraheader={auth_header}"])
+        command.extend(args)
+        return subprocess.check_output(command, cwd=cwd, stderr=subprocess.STDOUT)
+
+    def _format_git_error(self, error):
+        """提取 Git 命令的标准输出，便于定位失败原因。"""
+        output = getattr(error, "output", b"") or b""
+        if isinstance(output, bytes):
+            text = output.decode("utf-8", errors="ignore").strip()
+        else:
+            text = str(output).strip()
+        return text or str(error)
