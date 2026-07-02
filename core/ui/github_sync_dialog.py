@@ -13,11 +13,20 @@ from pathlib import Path
 
 try:
     from PySide2.QtCore import QThread, Signal, QObject
+    try:
+        from shiboken2 import isValid as qt_object_is_valid
+    except ImportError:
+        qt_object_is_valid = None
 except ImportError:
     try:
         from PySide6.QtCore import QThread, Signal, QObject
+        try:
+            from shiboken6 import isValid as qt_object_is_valid
+        except ImportError:
+            qt_object_is_valid = None
     except ImportError:
         QThread = threading.Thread
+        qt_object_is_valid = None
         class Signal:
             def __init__(self, *args): pass
             def connect(self, func): pass
@@ -185,6 +194,9 @@ class GitHubSyncDialog:
         # 上传相关
         self.upload_worker = None
         self.git_installed = False
+        self._dialog_closing = False
+        self._current_repo_name = ""
+        self._current_branch_name = ""
     
     def check_git_installed(self):
         """检查是否安装了 Git"""
@@ -202,6 +214,7 @@ class GitHubSyncDialog:
     def show_dialog(self):
         """显示 GitHub 同步对话框"""
         self.dialog = QDialog(self.parent)
+        self._dialog_closing = False
         
         # 检查 Git 是否已安装
         self.git_installed = self.check_git_installed()
@@ -445,8 +458,79 @@ class GitHubSyncDialog:
         # 初始刷新仓库列表
         if self.github_service.token and self.github_service.repo_owner:
             self.refresh_repos()
+
+        self.dialog.finished.connect(self.on_dialog_finished)
         
         self.dialog.show()
+
+    def _is_qt_object_alive(self, obj):
+        """检查 Qt 对象是否仍然有效。"""
+        if obj is None:
+            return False
+        if qt_object_is_valid is not None:
+            try:
+                return qt_object_is_valid(obj)
+            except Exception:
+                return False
+        try:
+            obj.objectName()
+            return True
+        except RuntimeError:
+            return False
+
+    def _is_ui_alive(self):
+        """UI 是否还可安全访问。"""
+        if self._dialog_closing:
+            return False
+        widgets = [
+            self.dialog,
+            self.progress_bar,
+            self.status_label,
+            self.upload_btn,
+            self.cancel_btn,
+            self.token_input,
+            self.repo_combo,
+            self.branch_combo,
+            self.upload_mode_combo,
+            self.upload_method_combo,
+            self.file_list_widget,
+        ]
+        return all(self._is_qt_object_alive(widget) for widget in widgets)
+
+    def _disconnect_worker_signals(self):
+        """断开上传线程信号，防止窗口关闭后继续回调 UI。"""
+        if not self.upload_worker:
+            return
+        for signal, handler in (
+            (self.upload_worker.progress, self.on_upload_progress),
+            (self.upload_worker.finished, self.on_upload_finished),
+            (self.upload_worker.error, self.on_upload_error),
+        ):
+            try:
+                signal.disconnect(handler)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _cleanup_worker(self):
+        """清理上传线程引用。"""
+        worker = self.upload_worker
+        self.upload_worker = None
+        if worker and hasattr(worker, "deleteLater"):
+            try:
+                worker.deleteLater()
+            except RuntimeError:
+                pass
+
+    def on_dialog_finished(self, _result):
+        """对话框关闭时停止后台回调。"""
+        self._dialog_closing = True
+        self._disconnect_worker_signals()
+        worker = self.upload_worker
+        if worker:
+            try:
+                worker.stop()
+            except Exception:
+                pass
     
     def verify_token(self):
         """验证 GitHub 令牌"""
@@ -668,6 +752,7 @@ class GitHubSyncDialog:
     
     def start_upload(self, repo_name, files_info, branch_name):
         """启动后台上传"""
+        self._dialog_closing = False
         # 禁用 UI
         self.set_ui_enabled(False)
         
@@ -706,11 +791,16 @@ class GitHubSyncDialog:
     
     def on_upload_progress(self, percentage, filename):
         """处理进度更新"""
+        if not self._is_ui_alive():
+            return
         self.progress_bar.setValue(percentage)
         self.status_label.setText(f"正在上传: {filename} ({percentage}%)")
     
     def on_upload_finished(self, success, result):
         """处理上传完成"""
+        if not self._is_ui_alive():
+            self._cleanup_worker()
+            return
         self.set_ui_enabled(True)
         
         if success:
@@ -730,27 +820,37 @@ class GitHubSyncDialog:
         
         # 隐藏进度条
         QTimer.singleShot(2000, self.hide_progress_bar)
+        self._cleanup_worker()
     
     def on_upload_error(self, error_msg):
         """处理上传错误"""
+        if not self._is_ui_alive():
+            self._cleanup_worker()
+            return
         self.set_ui_enabled(True)
         self.status_label.setText(f"上传出错: {error_msg}")
         QMessageBox.critical(self.dialog, "上传错误", f"上传过程中出错: {error_msg}")
         self.hide_progress_bar()
+        self._cleanup_worker()
     
     def cancel_upload(self):
         """取消上传"""
-        if self.upload_worker and self.upload_worker.isRunning():
+        if self.upload_worker and hasattr(self.upload_worker, "isRunning") and self.upload_worker.isRunning():
             self.upload_worker.stop()
-            self.status_label.setText("正在取消...")
-            self.cancel_btn.setEnabled(False)
+            if self._is_ui_alive():
+                self.status_label.setText("正在取消...")
+                self.cancel_btn.setEnabled(False)
     
     def hide_progress_bar(self):
         """隐藏进度条"""
+        if not self._is_qt_object_alive(self.progress_bar):
+            return
         self.progress_bar.setVisible(False)
     
     def set_ui_enabled(self, enabled):
         """设置 UI 是否可用"""
+        if not self._is_ui_alive():
+            return
         # 禁用/启用按钮
         self.upload_btn.setEnabled(enabled)
         self.cancel_btn.setVisible(not enabled)
