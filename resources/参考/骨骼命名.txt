@@ -1,0 +1,22 @@
+头  head
+脖子 neck  
+脊柱 spine
+锁骨 clavicle
+肩胛骨 scapula
+上臂 upperArm
+肘部 elbow
+手腕 wrist  手腕末端wristEnd
+
+拇指掌骨 thumbMetacarpal   拇指根骨 thumbBase  拇指尖 thumbTip   拇指末端 thumbEnd
+食指掌骨 indexMetacarpal     食指根骨 indexBase    食指指中 indexMid 食指指尖 indexTid     食指末端 indexEnd
+中指掌骨 middleMetacarpal   中指根骨 middleBase  中指指中 middleMid 中指指尖 middleTid 中指末端 middleEnd
+无名指掌骨 ringMetacarpal    无名指根骨 ringBase    无名指指中 ringMid  无名指指尖 ringTid  无名指末端 ringEnd
+小拇指掌骨 pinkyMetacarpal    小拇指根骨 pinkyBase    小拇指指中 pinkyMid  小拇指指尖 pinkyTid  小拇指末端 pinkyEnd
+
+大腿 upperLeg 
+膝盖 knee
+脚踝 ankle
+脚尖 ball 
+脚指toe 
+
+
