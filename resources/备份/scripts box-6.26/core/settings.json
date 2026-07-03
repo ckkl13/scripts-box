@@ -1,0 +1,24 @@
+{
+    "maya_info": {
+        "version": "2023",
+        "location": "",
+        "app_dir": "C:/Users/ck/Documents/maya/"
+    },
+    "toolbox": {
+        "tools_dir": "E:\\maya\\A\\scripts box\\tool",
+        "last_active_group": "default",
+        "window_size": [
+            761,
+            561
+        ],
+        "custom_scripts_paths": [],
+        "groups_order": [
+            "group_0_1747205104",
+            "group_1_1747205104",
+            "group_3_1747205104",
+            "group_4_1747205104",
+            "group_5_1747205104",
+            "group_2_1747205104"
+        ]
+    }
+}
