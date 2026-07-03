@@ -1,0 +1,518 @@
+global proc shelf_anime_jnt () {
+    global string $gBuffStr;
+    global string $gBuffStr0;
+    global string $gBuffStr1;
+
+
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "一键动力学依次选择骨骼" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "一键动力学" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "一键动力学" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "from maya import cmds\n\ncmds.loadPlugin(\"boneDynamicsNode.mll\", qt=True)\n\ndef create_dynamics_node(\n        bone, \n        end, \n        scalable=False, \n        target_bone=None, \n        offset_node=None, \n        colliders=[],\n        visualize=True,\n        additional_force_node=None, \n        additional_force_init_vec=[0,0,-1]\n    ):\n\n    if not bone in cmds.listRelatives(end, p=True):\n        print(\"Exit: {} is not {}'s parent.\".format(bone, end))\n        return\n    \n    boneDynamicsNode = cmds.createNode(\"boneDynamicsNode\")\n\n    cmds.connectAttr('time1.outTime', boneDynamicsNode + '.time', force=True)\n    cmds.connectAttr(bone + '.translate', boneDynamicsNode + '.boneTranslate', f=True)\n    cmds.connectAttr(bone + '.parentMatrix[0]', boneDynamicsNode + '.boneParentMatrix', f=True)\n    cmds.connectAttr(bone + '.parentInverseMatrix[0]', boneDynamicsNode + '.boneParentInverseMatrix', f=True)\n    cmds.connectAttr(bone + '.jointOrient', boneDynamicsNode + '.boneJointOrient', f=True)\n    cmds.connectAttr(end + '.translate', boneDynamicsNode + '.endTranslate', f=True)\n\n    cmds.connectAttr(boneDynamicsNode + '.outputRotate', bone + '.rotate', f=True)\n    \n    if scalable:\n        cmds.connectAttr(bone + '.scale', boneDynamicsNode + '.boneScale', f=True)\n        cmds.connectAttr(bone + '.inverseScale', boneDynamicsNode + '.boneInverseScale', f=True)\n        cmds.connectAttr(end + '.scale', boneDynamicsNode + '.endScale', f=True)\n\n    if target_bone:\n        if cmds.objExists(target_bone):\n            cmds.connectAttr(target_bone + '.rotate', boneDynamicsNode + '.rotationOffset', f=True)\n\n    if offset_node:\n        if cmds.objExists(offset_node):\n            cmds.connectAttr(offset_node + '.worldMatrix[0]', boneDynamicsNode + '.offsetMatrix', f=True)\n\n    if additional_force_node:\n        if cmds.objExists(additional_force_node):\n            vp = cmds.listConnections(additional_force_node + '.worldMatrix[0]', s=False, d=True, type='vectorProduct')\n            if vp:\n                vp = vp[0]\n            else:\n                vp = cmds.createNode('vectorProduct')\n                cmds.setAttr(vp + '.operation', 3)\n                cmds.setAttr(vp + '.input1', additional_force_init_vec[0], additional_force_init_vec[1], additional_force_init_vec[2], type='double3')\n                cmds.setAttr(vp + '.normalizeOutput', 1)\n                cmds.connectAttr(additional_force_node + '.worldMatrix[0]', vp + '.matrix', f=True)\n            cmds.connectAttr(vp + '.output', boneDynamicsNode + '.additionalForce', f=True)\n                \n    if visualize:\n        # angle limit\n        angle_cone = cmds.createNode(\"implicitCone\")\n        angle_cone_tm = cmds.listRelatives(angle_cone, p=True)[0]\n        angle_cone_ro = cmds.createNode(\"transform\", n=\"{}_cone_ro\".format(bone))\n        angle_cone_root = cmds.createNode(\"transform\", n=\"{}_cone_root\".format(bone))\n        cmds.setAttr(angle_cone_tm + '.ry', -90)\n        cmds.parent(angle_cone_tm, angle_cone_ro, r=True)\n        cmds.parent(angle_cone_ro, angle_cone_root, r=True)\n        bone_parent = cmds.listRelatives(bone, p=True)\n        if bone_parent:\n            cmds.parent(angle_cone_root, bone_parent[0], r=True)\n        cmds.connectAttr(boneDynamicsNode + '.boneTranslate', angle_cone_root + '.translate', f=True)\n        cmds.connectAttr(boneDynamicsNode + '.boneJointOrient', angle_cone_root + '.rotate', f=True)\n        cmds.connectAttr(boneDynamicsNode + '.rotationOffset', angle_cone_ro + '.rotate', f=True)\n        cmds.connectAttr(boneDynamicsNode + '.enableAngleLimit', angle_cone_root + '.v', f=True)\n        cmds.connectAttr(boneDynamicsNode + '.angleLimit', angle_cone + '.coneAngle', f=True)\n        cmds.setAttr(angle_cone + '.coneCap', 2)\n        cmds.setAttr(angle_cone_tm + '.overrideEnabled', 1)\n        cmds.setAttr(angle_cone_tm + '.overrideDisplayType', 2)\n\n        # collision radius\n        radius_sphere = cmds.createNode(\"implicitSphere\")\n        cmds.connectAttr(boneDynamicsNode + '.radius', radius_sphere + '.radius', f=True)\n        radius_sphere_tm = cmds.listRelatives(radius_sphere, p=True)[0]\n        cmds.parent(radius_sphere_tm, end, r=True)\n        cmds.setAttr(radius_sphere_tm + '.overrideEnabled', 1)\n        cmds.setAttr(radius_sphere_tm + '.overrideDisplayType', 2)\n        cmds.connectAttr(boneDynamicsNode + '.iterations', radius_sphere_tm + '.v', f=True)\n    \n    sphere_col_idx = 0\n    capsule_col_idx = 0\n    iplane_col_idx = 0\n    mesh_col_idx = 0\n\n    for col in colliders:\n        \n        if not cmds.objExists(col):\n            print(\"Skip: {} is not found.\".format(col))\n            continue\n\n        if not cmds.attributeQuery('colliderType', n=col, ex=True):\n            col_shape = cmds.listRelatives(col, s=True, f=True)\n            if col_shape:\n                if cmds.nodeType(col_shape[0]) == 'mesh':\n                    cmds.connectAttr(col_shape[0] + '.worldMesh[0]', boneDynamicsNode + '.meshCollider[{}]'.format(mesh_col_idx), f=True)\n                    mesh_col_idx += 1\n                    continue\n            print(\"Skip: {} has no 'colliderType' attribute.\".format(col))\n            continue\n\n        colliderType = cmds.getAttr(col + '.colliderType')\n        \n        if colliderType == 'sphere':\n            cmds.connectAttr(col + \".worldMatrix[0]\", boneDynamicsNode + \".sphereCollider[{}].sphereColMatrix\".format(sphere_col_idx), f=True)\n            cmds.connectAttr(col + \".radius\", boneDynamicsNode + \".sphereCollider[{}].sphereColRadius\".format(sphere_col_idx), f=True)\n            sphere_col_idx += 1\n        \n        elif colliderType in ['capsule', 'capsule2']:\n            radius_attr_a = \".radius\" if colliderType == 'capsule' else \".radiusA\"\n            radius_attr_b = \".radius\" if colliderType == 'capsule' else \".radiusB\"\n            a = cmds.listConnections(col + '.sphereA', d=0)[0]\n            b = cmds.listConnections(col + '.sphereB', d=0)[0]\n            cmds.connectAttr(a + \".worldMatrix[0]\", boneDynamicsNode + \".capsuleCollider[{}].capsuleColMatrixA\".format(capsule_col_idx), f=True)\n            cmds.connectAttr(b + \".worldMatrix[0]\", boneDynamicsNode + \".capsuleCollider[{}].capsuleColMatrixB\".format(capsule_col_idx), f=True)\n            cmds.connectAttr(col + radius_attr_a, boneDynamicsNode + \".capsuleCollider[{}].capsuleColRadiusA\".format(capsule_col_idx), f=True)\n            cmds.connectAttr(col + radius_attr_b, boneDynamicsNode + \".capsuleCollider[{}].capsuleColRadiusB\".format(capsule_col_idx), f=True)\n            capsule_col_idx += 1\n        \n        elif colliderType == 'infinitePlane':\n            cmds.connectAttr(col + \".worldMatrix[0]\", boneDynamicsNode + \".infinitePlaneCollider[{}].infinitePlaneColMatrix\".format(iplane_col_idx), f=True)\n            iplane_col_idx += 1\n\n    return boneDynamicsNode\n\nif __name__ == \"__main__\":\n    \n    # Select in order from root to tip of the joint-chain.\n    joints = cmds.ls(sl=True)\n    \n    # Enable per-section scaling.\n    scalable = True\n    \n    # Place the collider created by expcol as a child of 'collider_grp'.\n    colliders = []\n    if cmds.objExists(\"collider_grp\"):\n        colliders = cmds.ls(cmds.listRelatives(\"collider_grp\", c=True), tr=True)\n    \n    # Duplicate the joint-chain to be simulated and add '_target' to the postfix.\n    target_bone_postfix = \"_target\"\n    \n    # Name of the node to offset the transform.\n    offset_node_name = \"offset\"\n\n    # Node name that controls the direction of additional force\n    additional_force_node_name = \"wind\"\n    \n    # ---------------------------------------------------\n\n    set_name = \"boneDynamicsNodeSet\"\n    if not cmds.objExists(set_name):\n        cmds.select(cl=True)\n        cmds.sets(name=set_name)\n\n    for bone, end in zip(joints[:-1], joints[1:]):\n        boneDynamicsNode = create_dynamics_node(\n            bone, \n            end,\n            scalable=scalable, \n            target_bone=bone+target_bone_postfix, \n            offset_node=offset_node_name, \n            colliders=colliders,\n            visualize=True,\n            additional_force_node=additional_force_node_name,\n            additional_force_init_vec=[0, 0, -1]\n        )\n\n        if boneDynamicsNode:\n            cmds.sets(boneDynamicsNode, addElement=set_name)" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "动力学" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "动力学" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "动力学" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "from maya import cmds\n\ncmds.loadPlugin(\"boneDynamicsNode.mll\", qt=True)\n\ndef create_dynamics_node(bone, end):\n\n    if not bone in cmds.listRelatives(end, p=True):\n        print(\"Exit: {} is not {}'s parent.\".format(bone, end))\n        return\n\n    boneDynamicsNode = cmds.createNode(\"boneDynamicsNode\")\n\n    cmds.connectAttr('time1.outTime', boneDynamicsNode + '.time', force=True)\n    cmds.connectAttr(bone + '.translate', boneDynamicsNode + '.boneTranslate', f=True)\n    cmds.connectAttr(bone + '.parentMatrix[0]', boneDynamicsNode + '.boneParentMatrix', f=True)\n    cmds.connectAttr(bone + '.parentInverseMatrix[0]', boneDynamicsNode + '.boneParentInverseMatrix', f=True)\n    cmds.connectAttr(bone + '.jointOrient', boneDynamicsNode + '.boneJointOrient', f=True)\n    cmds.connectAttr(end + '.translate', boneDynamicsNode + '.endTranslate', f=True)\n\n    cmds.connectAttr(boneDynamicsNode + '.outputRotate', bone + '.rotate', f=True)\n\n    return boneDynamicsNode\n\nif __name__ == \"__main__\":\n    \n    # Select in order from root to tip of the joint-chain\n    joints = cmds.ls(sl=True)\n\n    # ---------------------------------------------------\n\n    set_name = \"boneDynamicsNodeSet\"\n    if not cmds.objExists(set_name):\n        cmds.select(cl=True)\n        cmds.sets(name=set_name)\n\n    for bone, end in zip(joints[:-1], joints[1:]):\n        boneDynamicsNode = create_dynamics_node(bone, end)\n        cmds.sets(boneDynamicsNode, addElement=set_name)" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "动力学连接" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "动力学连接" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "动力学连接" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "from maya import cmds\n\ndef orient_const_with_pair_blend(master, slave, switch=None):\n    cons = cmds.orientConstraint(master, slave, mo=True)[0]\n    pb = cmds.createNode('pairBlend')\n    \n    if switch:\n        cmds.connectAttr(switch, '{}.weight'.format(pb), f=True)\n        \n    # 使用正确的大小写 'X', 'Y', 'Z'\n    for at in 'XYZ':\n        cmds.connectAttr('{}.constraintRotate{}'.format(cons, at), '{}.inRotate{}2'.format(pb, at), f=True)\n        cmds.connectAttr('{}.outRotate{}'.format(pb, at), '{}.rotate{}'.format(slave, at), f=True)\n       \nif __name__ == \"__main__\":\n    sel = cmds.ls(sl=True)\n    orient_const_with_pair_blend(sel[0], sel[1], \"rig.Dynamics_Intensity\") # 替换引号里的内容（创建属性）" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "碰撞" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "碰撞" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "碰撞体" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "from expcol import collider\n\ncollider.iplane()   # Infinite Plane\ncollider.sphere()   # Sphere\ncollider.capsule()  # Capsule\ncollider.capsule2() # Capsule2 (radius individually)\ncollider.cuboid()   # Cuboid" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "连接碰撞" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "连接碰撞" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "连接碰撞" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "from maya import cmds\n\ndef connect_to_bone_dynamics(bone_dynamics_node, selected_object, collider_index):\n    # 检查物体是否存在\n    if not cmds.objExists(selected_object):\n        print(\"Error: {} does not exist.\".format(selected_object))\n        return\n\n    # 验证节点类型\n    if not cmds.nodeType(bone_dynamics_node) == 'boneDynamicsNode':\n        print(\"Error: {} is not a valid boneDynamicsNode.\".format(bone_dynamics_node))\n        return\n\n    # 连接物体的 worldMatrix 到 boneDynamicsNode 的 Sphere Collider Matrix\n    cmds.connectAttr(selected_object + '.worldMatrix[0]', \n                     '{}.sphereCollider[{}].sphereColMatrix'.format(bone_dynamics_node, collider_index), \n                     force=True)\n\n    # 连接物体的 radius 属性（如果存在）到 Sphere Collider Radius\n    if cmds.attributeQuery('radius', node=selected_object, exists=True):\n        cmds.connectAttr(selected_object + '.radius', \n                         '{}.sphereCollider[{}].sphereColRadius'.format(bone_dynamics_node, collider_index), \n                         force=True)\n    else:\n        print(\"Warning: {} does not have a 'radius' attribute.\".format(selected_object))\n\n\n# 获取当前选择的对象\nselected_objects = cmds.ls(selection=True)\n\n# 检查是否选择了多个节点和物体\nif len(selected_objects) < 2:\n    print(\"Please select at least one boneDynamicsNode and one target object.\")\nelse:\n    # 过滤出所有的 boneDynamicsNode 节点\n    bone_dynamics_nodes = [node for node in selected_objects if cmds.nodeType(node) == 'boneDynamicsNode']\n    # 过滤出所有其他目标物体\n    target_objects = [obj for obj in selected_objects if cmds.nodeType(obj) != 'boneDynamicsNode']\n\n    # 检查是否有足够的节点和物体\n    if not bone_dynamics_nodes:\n        print(\"No boneDynamicsNode nodes selected.\")\n    elif not target_objects:\n        print(\"No target objects selected.\")\n    else:\n        # 遍历每一个 boneDynamicsNode 节点\n        for bone_dynamics_node in bone_dynamics_nodes:\n            # 遍历每一个选中的物体\n            for obj in target_objects:\n                # 检查 boneDynamicsNode 的 sphereCollider 的数量\n                collider_count = cmds.getAttr('{}.sphereCollider'.format(bone_dynamics_node), size=True)\n                \n                if collider_count > 0:\n                    # 假设我们连接到第一个 Collider\n                    for collider_index in range(collider_count):\n                        connect_to_bone_dynamics(bone_dynamics_node, obj, collider_index)\n                else:\n                    print(\"Error: No sphere colliders available in {}.\".format(bone_dynamics_node))" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "骨骼的名字必须是bone_side(m/l/r)_描述_编号，样条线的名字必须是side(m/l/r)_描述或编号" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "ui" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "ui" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import maya.cmds as cmds\nimport importlib\nfrom dynamics_scripts_ui.main import main_ui as dy\ndy.main()" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "手指属性" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "手指属性" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "手指属性" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import maya.cmds as cmds\n\n# get finger names\nfinger_names = ['thumb', 'index', 'middle', 'ring', 'pinky']\n\n# get digit names\ndigit_names = {'thumb': ['metacarpal', 'base', 'tip']}\n\n# get curl multiple values\ncurl_mult_values = {'thumb': [-3, -5, -7],\n                    'index': [0, -7.5, -10.5, -8],\n                    'middle': [0, -7.5, -10.5, -8],\n                    'ring': [0, -7.5, -10.5, -8],\n                    'pinky': [0, -7.5, -10.5, -8]}\n\n# loop into each side\nfor side in 'lr':\n    # get hand pose ctrl\n    pose_ctrl = 'ctrl_{}_handPose_001'.format(side)\n    # loop into each finger, and add curl attr\n    for finger in finger_names:\n        cmds.addAttr(pose_ctrl, longName=finger + 'Curl', attributeType='float', keyable=True, minValue=0, maxValue=10)\n        curl_attr = '{}.{}Curl'.format(pose_ctrl, finger)\n\n        # get curl values\n        curl_values = curl_mult_values[finger]\n        # get digit names\n        finger_digits = digit_names.get(finger, ['metacarpal', 'base', 'mid', 'tip'])\n        # loop into each digit and connect the curl\n        for digit, val in zip(finger_digits, curl_values):\n            offset_name = 'offset_{}_{}{}_001'.format(side, finger, digit.title())\n\n            if val:\n                # create multiply node\n                mult_node = cmds.createNode('multDoubleLinear',\n                                            name='mult_{}_{}{}Curl_001'.format(side, finger, digit.title()))\n                # connect driver attr\n                cmds.connectAttr(curl_attr, mult_node + '.input1')\n                # set curl value\n                cmds.setAttr(mult_node + '.input2', val)\n\n                # connect output to offset group's rotateZ\n                cmds.connectAttr(mult_node + '.output', offset_name + '.rotateZ')\n" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "手指pose" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "手指pose" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "手指pose" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import maya.cmds as cmds\n\ndef create_hand_pose_ui():\n    # 检查窗口是否已存在，避免重复创建\n    if cmds.window(\"handPoseUI\", exists=True):\n        cmds.deleteUI(\"handPoseUI\")\n    \n    # 创建窗口\n    window = cmds.window(\"handPoseUI\", title=\"Hand Pose Tool\", widthHeight=(400, 350))\n    \n    # 创建主布局\n    cmds.columnLayout(adjustableColumn=True)\n    \n    # 创建“Create Hand Pose”按钮，始终位于最上面\n    cmds.button(label=\"Create Hand Pose\", command=lambda _: create_hand_pose(\n        pose_name=cmds.textField(pose_name_field, query=True, text=True),\n        mirror_right=cmds.checkBox(mirror_checkbox, query=True, value=True),\n        finger_mirrors={finger: cmds.checkBox(cb, query=True, value=True) \n                        for finger, cb in finger_mirror_checkboxes.items()},\n        joint_mirrors={finger: {joint: cmds.checkBox(cb, query=True, value=True) \n                                for joint, cb in joint_mirror_checkboxes[finger].items()} \n                       for finger in joint_mirror_checkboxes}\n    ))\n\n    # 属性名称输入框\n    cmds.text(label=\"Pose Attribute Name:\")\n    pose_name_field = cmds.textField(placeholderText=\"Enter pose name, e.g., spread\")\n    \n    # 是否翻转右手的复选框\n    mirror_checkbox = cmds.checkBox(label=\"Mirror Right Side (Multiply by -1) for All Fingers\", value=True,\n                                    changeCommand=lambda _: update_finger_mirror_controls(mirror_checkbox, finger_mirror_checkboxes, joint_mirror_checkboxes))\n    \n    # 折叠框布局\n    frame = cmds.frameLayout(label=\"Finger and Joint Controls\", collapsable=True, collapse=True)\n    cmds.columnLayout(adjustableColumn=True, parent=frame)\n    \n    # 创建每个手指和每个关节的翻转开关\n    finger_mirror_checkboxes = {}\n    joint_mirror_checkboxes = {}\n    \n    for finger in ['thumb', 'index', 'middle', 'ring', 'pinky']:\n        # 手指翻转控制\n        finger_mirror_checkboxes[finger] = cmds.checkBox(label=f\"Mirror {finger.capitalize()} Finger\", value=True, enable=False)\n        # 每个手指的每个关节都需要有一个翻转开关\n        joint_mirror_checkboxes[finger] = {}\n        for joint in ['metacarpal', 'base', 'mid', 'tip']:\n            joint_mirror_checkboxes[finger][joint] = cmds.checkBox(label=f\"Mirror {finger.capitalize()} {joint.capitalize()} Joint\", value=True, enable=False)\n    \n    # 显示窗口\n    cmds.showWindow(window)\n\ndef update_finger_mirror_controls(mirror_checkbox, finger_mirror_checkboxes, joint_mirror_checkboxes):\n    # 获取 Mirror Right Side 复选框的状态\n    mirror_right = cmds.checkBox(mirror_checkbox, query=True, value=True)\n    \n    # 根据复选框状态更新每个手指和关节的翻转开关\n    for finger in finger_mirror_checkboxes:\n        cmds.checkBox(finger_mirror_checkboxes[finger], edit=True, enable=not mirror_right, value=mirror_right)\n        for joint in joint_mirror_checkboxes[finger]:\n            cmds.checkBox(joint_mirror_checkboxes[finger][joint], edit=True, enable=not mirror_right, value=mirror_right)\n\ndef create_hand_pose(pose_name, mirror_right, finger_mirrors, joint_mirrors):\n    if not pose_name:  # 验证输入的属性名\n        cmds.warning(\"Please provide a valid pose name!\")\n        return\n\n    # 定义手指和指节名称\n    finger_names = ['thumb', 'index', 'middle', 'ring', 'pinky']\n    digit_names = ['metacarpal', 'base', 'mid', 'tip']\n    \n    # 左右手的姿态控制器\n    pose_ctrl_left = 'ctrl_l_handPose_001'\n    pose_ctrl_right = 'ctrl_r_handPose_001'\n    \n    # 为姿态控制器添加自定义属性\n    for pose_ctrl in [pose_ctrl_left, pose_ctrl_right]:\n        if not cmds.objExists(f\"{pose_ctrl}.{pose_name}\"):\n            cmds.addAttr(pose_ctrl, longName=pose_name, attributeType='float', minValue=0, maxValue=10, keyable=True)\n    \n    # 遍历每个手指和指节\n    for finger in finger_names:\n        for digit in digit_names:\n            ctrl_name = 'ctrl_l_{}{}_001'.format(finger, digit.title())\n            if cmds.objExists(ctrl_name):  # 检查控制器是否存在\n                connect_group_left = ctrl_name.replace('ctrl', 'connect')\n                connect_group_right = connect_group_left.replace('_l_', '_r_')\n                \n                for attr in ['rotateX', 'rotateY', 'rotateZ']:\n                    val = cmds.getAttr('{}.{}'.format(ctrl_name, attr))\n                    if val != 0:  # 跳过值为0的属性\n                        # 左手驱动关键帧\n                        cmds.setDrivenKeyframe('{}.{}'.format(connect_group_left, attr),\n                                               currentDriver='{}.{}'.format(pose_ctrl_left, pose_name),\n                                               driverValue=10, value=val)\n                        cmds.setDrivenKeyframe('{}.{}'.format(connect_group_left, attr),\n                                               currentDriver='{}.{}'.format(pose_ctrl_left, pose_name),\n                                               driverValue=0, value=0)\n                        \n                        # 判断是否为右手，若是，是否需要乘以-1\n                        right_value = -val if (mirror_right or finger_mirrors[finger] or joint_mirrors[finger][digit]) else val\n                        cmds.setDrivenKeyframe('{}.{}'.format(connect_group_right, attr),\n                                               currentDriver='{}.{}'.format(pose_ctrl_right, pose_name),\n                                               driverValue=10, value=right_value)\n                        cmds.setDrivenKeyframe('{}.{}'.format(connect_group_right, attr),\n                                               currentDriver='{}.{}'.format(pose_ctrl_right, pose_name),\n                                               driverValue=0, value=0)\n                        \n                        # 将控制器属性值归零\n                        cmds.setAttr('{}.{}'.format(ctrl_name, attr), 0)\n\n    cmds.confirmDialog(title=\"Success\", message=\"Hand pose created successfully!\", button=[\"OK\"])\n\n# 启动UI\ncreate_hand_pose_ui()\n" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "修型骨" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "修型骨" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "修型骨" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import maya.cmds as cmds\n\n\ndef avg_joint(drivers, weight=0.5):\n    \"\"\"\n    create average joint between drivers\n\n    Args:\n        drivers (list): driver joints, the average joint will be parented to the first driver\n        weight (float): weight blend between drivers\n\n    Returns:\n        avg_jnt(str): average joint's name\n    \"\"\"\n    # get name parts\n    name_parts = drivers[0].split('_')\n    # create average joint\n    avg_jnt = cmds.createNode('joint', name=drivers[0].replace(name_parts[2], name_parts[2] + 'Avg'))\n    # snap to driver's position\n    cmds.matchTransform(avg_jnt, drivers[0], position=True)\n    # do a temp orient constraint to get average orientation\n    cons_node = cmds.orientConstraint(drivers, avg_jnt, maintainOffset=False)[0]\n    cmds.setAttr(cons_node + '.interpType', 2)\n    cmds.setAttr('{}.{}W0'.format(cons_node, drivers[0]), weight)\n    cmds.setAttr('{}.{}W1'.format(cons_node, drivers[1]), 1 - weight)\n    # delete orient constraint node\n    cmds.delete(cons_node)\n    # freeze transformation to bake the orientation to joint orient\n    cmds.makeIdentity(avg_jnt, apply=True, translate=True, rotate=True, scale=True)\n    # parent to driver node\n    cmds.parent(avg_jnt, drivers[0])\n\n    # do orient constraint to drive the avg joint\n    cons_node = cmds.orientConstraint(drivers, avg_jnt, maintainOffset=False)[0]\n    cmds.setAttr(cons_node + '.interpType', 2)\n    cmds.setAttr('{}.{}W0'.format(cons_node, drivers[0]), weight)\n    cmds.setAttr('{}.{}W1'.format(cons_node, drivers[1]), 1 - weight)\n\n    # return the average joint name\n    return avg_jnt\n\n\ndef add_push_joint(avg_jnt, driver_axis='z', distance_axis='y', scale_axis='x', driver_value=60, distance_value=5,\n                   scale_value=0.2):\n    \"\"\"\n    add push joint to existing average joint\n\n    Args:\n        avg_jnt (str): average joint's name\n        driver_axis (str): driver rotation axis\n        distance_axis (str): pushing axis\n        scale_axis (str): scale axis\n        driver_value (float): driver rotation maximum value\n        distance_value (float): maximum pushing value\n        scale_value (float): maximum scaling value\n\n    Returns:\n        push_jnt (str): push joint's name\n    \"\"\"\n    # get name parts\n    name_parts = avg_jnt.split('_')\n    name_side = name_parts[1]\n    name_description = name_parts[2] + 'Push'\n    name_index = int(name_parts[3])\n\n    # create push joint\n    push_jnt = cmds.createNode('joint', name='jnt_{}_{}_{:03d}'.format(name_side, name_description, name_index))\n    # snap to average joint position and freeze transformation\n    cmds.matchTransform(push_jnt, avg_jnt, position=True, rotation=True)\n    cmds.makeIdentity(push_jnt, apply=True, translate=True, rotate=True, scale=True)\n    cmds.parent(push_jnt, avg_jnt)\n\n    # add remap value node to drive the push distance\n    remap_dis = cmds.createNode('remapValue', name='remap_{}_{}Dis_{:03d}'.format(name_side, name_description,\n                                                                                  name_index))\n    # connect driver attr to remap node and set range\n    cmds.connectAttr('{}.rotate{}'.format(avg_jnt, driver_axis.upper()), remap_dis + '.inputValue')\n    cmds.setAttr(remap_dis + '.inputMin', 0)\n    cmds.setAttr(remap_dis + '.inputMax', driver_value)\n    cmds.setAttr(remap_dis + '.outputMin', 0)\n    cmds.setAttr(remap_dis + '.outputMax', distance_value)\n    cmds.connectAttr(remap_dis + '.outValue', '{}.translate{}'.format(push_jnt, distance_axis.upper()))\n\n    # add remap value node to drive the scale\n    remap_scl = cmds.createNode('remapValue', name='remap_{}_{}Scl_{:03d}'.format(name_side, name_description,\n                                                                                  name_index))\n    # connect driver attr to remap node and set range\n    cmds.connectAttr('{}.rotate{}'.format(avg_jnt, driver_axis.upper()), remap_scl + '.inputValue')\n    cmds.setAttr(remap_scl + '.inputMin', 0)\n    cmds.setAttr(remap_scl + '.inputMax', driver_value)\n    cmds.setAttr(remap_scl + '.outputMin', 1)\n    cmds.setAttr(remap_scl + '.outputMax', scale_value)\n    cmds.connectAttr(remap_scl + '.outValue', '{}.scale{}'.format(push_jnt, scale_axis.upper()))\n\n    # return push joint's name\n    return push_jnt\n\n\navg_jnt_info = {'jnt_l_elbow_001': {'driver': 'jnt_l_upperArm_001',\n                                    'weight': 0.5,\n                                    'driver_axis': 'y',\n                                    'distance_axis': 'z',\n                                    'scale_axis': 'x',\n                                    'driver_value': 60,\n                                    'distance_value': -8,\n                                    'scale_value': 0.2},\n\n                'jnt_l_wrist_001': {'driver': 'jnt_l_elbowTwist_005',  # 修改为 jnt_l_elbowTwist_005\n                                    'weight': 0.5,\n                                    'push': False},\n\n                'jnt_l_knee_001': {'driver': 'jnt_l_upperLeg_001',\n                                   'weight': 0.5,\n                                   'driver_axis': 'z',\n                                   'distance_axis': 'y',\n                                   'scale_axis': 'x',\n                                   'driver_value': 60,\n                                   'distance_value': 8,\n                                   'scale_value': 0.2},\n\n                'jnt_l_ankle_001': {'driver': 'jnt_l_elbowTwist_005',  # 修改为 jnt_l_elbowTwist_005\n                                    'weight': 0.5,\n                                    'push': False},\n\n                'jnt_l_ball_001': {'driver': 'jnt_l_ankle_001',\n                                   'weight': 0.5,\n                                   'push': False}}\n\n# Add finger joints\nfor finger in ['thumb', 'index', 'middle', 'ring', 'pinky']:\n    for digit in ['base', 'mid', 'tip']:\n        jnt = 'jnt_l_{}{}_001'.format(finger, digit.title())\n        if cmds.objExists(jnt):\n            parent_jnt = cmds.listRelatives(jnt, parent=True)[0]\n            avg_jnt_info.update({jnt: {'driver': parent_jnt,\n                                       'weight': 0.5,\n                                       'driver_axis': 'z',\n                                       'distance_axis': 'y',\n                                       'scale_axis': 'x',\n                                       'driver_value': 45,\n                                       'distance_value': 1.5,\n                                       'scale_value': 0.2}})\n\n# Create average joints and add push joints\nfor jnt, jnt_info in avg_jnt_info.items():\n    avg_jnt_left = avg_joint([jnt, jnt_info['driver']], weight=jnt_info['weight'])\n    avg_jnt_right = avg_joint([jnt.replace('_l_', '_r_'), jnt_info['driver'].replace('_l_', '_r_')],\n                              weight=jnt_info['weight'])\n\n    push = jnt_info.get('push', True)\n    if push:\n        add_push_joint(avg_jnt_left, driver_axis=jnt_info['driver_axis'], distance_axis=jnt_info['distance_axis'],\n                       scale_axis=jnt_info['scale_axis'], driver_value=jnt_info['driver_value'],\n                       distance_value=jnt_info['distance_value'], scale_value=jnt_info['scale_value'])\n\n        add_push_joint(avg_jnt_right, driver_axis=jnt_info['driver_axis'], distance_axis=jnt_info['distance_axis'],\n                       scale_axis=jnt_info['scale_axis'], driver_value=jnt_info['driver_value'],\n                       distance_value=-jnt_info['distance_value'], scale_value=jnt_info['scale_value']) \n\ncmds.confirmDialog(title=\"Success\", message=\"Hand pose created successfully!\", button=[\"OK\"])\n" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "修型参数镜像" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "修型参数镜像" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "镜像修型参数" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import maya.cmds as cmds\n\n\ndef mirror_push_settings(push_jnt):\n    \"\"\"\n    镜像推力关节的设置。\n\n    参数：\n        push_jnt (str): 左侧推力关节的名称。\n    \"\"\"\n    # 获取输入连接\n    input_nodes = cmds.listConnections(push_jnt, source=True, destination=False, plugs=False, type='remapValue')\n\n    if input_nodes:\n        for remap_node in input_nodes:\n            remap_mirror = remap_node.replace('_l_', '_r_')\n\n            # 获取并设置 inputMax 值\n            val = cmds.getAttr(remap_node + '.inputMax')\n            cmds.setAttr(remap_mirror + '.inputMax', val)\n\n            # 获取并设置 outputMax 值\n            val = cmds.getAttr(remap_node + '.outputMax')\n            if 'Dis' in remap_node:\n                val = -val\n            cmds.setAttr(remap_mirror + '.outputMax', val)\n\n\n# 获取所有左侧推力关节\npush_jnts = cmds.ls('jnt_l_*Push_???', type='joint')\nfor jnt in push_jnts:\n    mirror_push_settings(jnt)  # 使用正确的变量名\n\ncmds.confirmDialog(title=\"Success\", message=\"ok!\", button=[\"OK\"])\n" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "肌肉函数" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "肌肉函数" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "肌肉函数" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import maya.cmds as cmds\n\n\ndef create_muscle_joint(blueprint_joint, parent_joint, driver_joint, position_override=None, up_vector=None,\n                        skip_axis=None, pos_limit=None, volume_y=0.5, volume_z=0.5, connect_driver=None,\n                        connect_attrs=None, connect_weight=1, mirror=True):\n    \"\"\"\n    create single chain aim constraint setup to simulate muscle behavior\n\n    Args:\n        blueprint_joint (str): muscle joint's blueprint, need to have a child joint and proper joint orientation\n        parent_joint (str): muscle joint setup's parent joint\n        driver_joint (str): driver joint for muscle behavior\n        position_override (str): if the muscle joint need to follow the other node's position, but keep the space under\n                                 the parent joint, then put the node name here.\n        up_vector (list): muscle joint's up vector, default is [0, 1, 0]\n        skip_axis (list): skip translation axis for aim target\n        pos_limit (list): aim target's translation limitation, the format is\n                          [[x_min, x_max], [y_min, y_max], [z_min, z_max]], use None if no limitation value,\n                          like [[-1, None], None, [None, 20]]\n        volume_y (float): scale volume on y axis\n        volume_z (float): scale volume on z axis\n        connect_driver (str): driver node name if need to connect attribute to aim target directly.\n                              some area like bicep works better this way\n        connect_attrs (list): driver and driven attributes to connect together\n        connect_weight (float): connection weight between driver and driven attributes\n        mirror (bool): mirror setup from left side to right\n    \"\"\"\n    # get name parts\n    name_parts = blueprint_joint.split('_')\n    side = name_parts[1]\n    description = name_parts[2]\n    index = int(name_parts[3])\n\n    # get end blueprint joint\n    blueprint_end = cmds.listRelatives(blueprint_joint, children=True, type='joint')[0]\n\n    # duplicate joints base on blueprint\n    muscle_jnt = cmds.duplicate(blueprint_joint, name=blueprint_joint.replace('bpJnt', 'jnt'))[0]\n    # get muscle end joint's full path since the duplications has the same name as blueprint end\n    muscle_end = cmds.listRelatives(muscle_jnt, children=True, fullPath=True)[0]\n    # rename so we will have unique name for muscle end joint\n    muscle_end = cmds.rename(muscle_end, blueprint_end.replace('bpJnt', 'jnt'))\n\n    # create muscle joint group to hold all nodes\n    muscle_grp = cmds.createNode('transform', name='grp_{}_{}RigNodes_{:03d}'.format(side, description, index))\n    # snap to muscle joint\n    cmds.matchTransform(muscle_grp, muscle_jnt, position=True, rotation=True)\n    # parent to parent joint\n    cmds.parent(muscle_grp, parent_joint)\n    # parent muscle joint to muscle group\n    cmds.parent(muscle_jnt, muscle_grp)\n\n    # constraint if have node name in position override\n    if position_override:\n        cmds.parentConstraint(position_override, muscle_jnt, maintainOffset=True, skipRotate=['x', 'y', 'z'])\n\n    # create aim target with groups\n    aim_target = cmds.spaceLocator(name='loc_{}_{}Target_{:03d}'.format(side, description, index))[0]\n    connect_target = cmds.createNode('transform', name=aim_target.replace('loc', 'connect'))\n    driven_target = cmds.createNode('transform', name=aim_target.replace('loc', 'driven'))\n    zero_target = cmds.createNode('transform', name=aim_target.replace('loc', 'zero'))\n\n    cmds.parent(aim_target, connect_target)\n    cmds.parent(connect_target, driven_target)\n    cmds.parent(driven_target, zero_target)\n\n    # create transform to represent aim target's position under muscle group\n    pos_target = cmds.createNode('transform', name='grp_{}_{}TargetPos_{:03d}'.format(side, description, index))\n    cmds.pointConstraint(aim_target, pos_target, maintainOffset=False)\n\n    # match aim target position to end joint\n    cmds.matchTransform(zero_target, muscle_end, position=True)\n    # match aim target rotation to muscle joint\n    cmds.matchTransform(zero_target, muscle_jnt, rotation=True)\n\n    # parent both under muscle group\n    cmds.parent(pos_target, zero_target, muscle_grp)\n\n    # hide locator\n    cmds.setAttr(aim_target + '.visibility', 0)\n\n    # create aim constraint\n    # get end joint translate X value, if it's greater than or equal to 0, aim vector is [1, 0, 0]\n    # otherwise it's [-1, 0, 0]\n    tx_val = cmds.getAttr(muscle_end + '.translateX')\n    if tx_val >= 0:\n        aim_vector = [1, 0, 0]\n    else:\n        aim_vector = [-1, 0, 0]\n\n    if not up_vector:\n        up_vector = [0, 1, 0]\n\n    cmds.aimConstraint(aim_target, muscle_jnt, aimVector=aim_vector, upVector=up_vector, worldUpType='none',\n                       maintainOffset=False)\n\n    # parent constraint aim target's driven group with driver joint\n    if skip_axis:\n        skip_translate = skip_axis\n    else:\n        skip_translate = 'none'\n    cmds.parentConstraint(driver_joint, driven_target, maintainOffset=True, skipTranslate=skip_translate,\n                          skipRotate=['x', 'y', 'z'])\n\n    # connect attribute for aim target's connect group\n    if connect_driver and connect_attrs:\n        mult = cmds.createNode('multDoubleLinear',\n                               name='mult_{}_{}TargetDriver_{:03d}'.format(side, description, index))\n        cmds.connectAttr('{}.{}'.format(connect_driver, connect_attrs[0]), mult + '.input1')\n        cmds.setAttr(mult + '.input2', connect_weight)\n        cmds.connectAttr(mult + '.output', '{}.{}'.format(connect_target, connect_attrs[1]))\n\n    # set pos limitation\n    if pos_limit:\n        pos_info = {}\n        for axis, limits in zip(['x', 'y', 'z'], pos_limit):\n            # [[x_min, x_max], [y_min, y_max], [z_min, z_max]]\n            # x, [x_min, x_max]/None\n            if limits:\n                enable_limits = [False, False]\n                limits_values = [-100, 100]\n                if limits[0] is not None:\n                    enable_limits[0] = True\n                    limits_values[0] = limits[0]\n                if limits[1] is not None:\n                    enable_limits[1] = True\n                    limits_values[1] = limits[1]\n                pos_info.update({'enable_' + axis: enable_limits,\n                                 'limit_' + axis: limits_values})\n\n        cmds.transformLimits(driven_target, translationX=pos_info.get('limit_x', [-100, 100]),\n                             enableTranslationX=pos_info.get('enable_x', [False, False]),\n                             translationY=pos_info.get('limit_y', [-100, 100]),\n                             enableTranslationY=pos_info.get('enable_y', [False, False]),\n                             translationZ=pos_info.get('limit_z', [-100, 100]),\n                             enableTranslationZ=pos_info.get('enable_z', [False, False]))\n\n    # add stretch\n    # add distance node between muscle joint and target transform\n    dis_node = cmds.createNode('distanceBetween', name='dis_{}_{}Stretch_{:03d}'.format(side, description, index))\n    cmds.connectAttr(muscle_jnt + '.translate', dis_node + '.point1')\n    cmds.connectAttr(pos_target + '.translate', dis_node + '.point2')\n    # get distance value\n    dis_val = cmds.getAttr(dis_node + '.distance')\n\n    # use multiply divide node to get stretch ratio\n    div_node = cmds.createNode('multiplyDivide', name='div_{}_{}StretchRatio_{:03d}'.format(side, description, index))\n    cmds.setAttr(div_node + '.operation', 2)\n    cmds.connectAttr(dis_node + '.distance', div_node + '.input1X')\n    cmds.setAttr(div_node + '.input2X', dis_val)\n\n    # connect stretch ratio to muscle joint's scale X\n    cmds.connectAttr(div_node + '.outputX', muscle_jnt + '.scaleX')\n\n    # add stretch volume\n    # add volume attributes to control the behavior\n    cmds.addAttr(muscle_jnt, longName='volumeY', attributeType='float', defaultValue=volume_y, keyable=True)\n    cmds.addAttr(muscle_jnt, longName='volumeZ', attributeType='float', defaultValue=volume_z, keyable=True)\n    # use power to get volume values, in order to do this, we need reverse the stretch ratio\n    cmds.setAttr(div_node + '.input1Y', dis_val)\n    cmds.connectAttr(dis_node + '.distance', div_node + '.input2Y')\n    # create power node\n    power_node = cmds.createNode('multiplyDivide', name='power_{}_{}StretchVol_{:03d}'.format(side, description, index))\n    cmds.setAttr(power_node + '.operation', 3)\n    cmds.connectAttr(div_node + '.outputY', power_node + '.input1Y')\n    cmds.connectAttr(div_node + '.outputY', power_node + '.input1Z')\n    cmds.connectAttr(muscle_jnt + '.volumeY', power_node + '.input2Y')\n    cmds.connectAttr(muscle_jnt + '.volumeZ', power_node + '.input2Z')\n    # connect back scale YZ\n    cmds.connectAttr(power_node + '.outputY', muscle_jnt + '.scaleY')\n    cmds.connectAttr(power_node + '.outputZ', muscle_jnt + '.scaleZ')\n\n    # check if need mirror\n    if mirror and side == 'l':\n        # get mirrored pos limitation, because the translation values are opposite,\n        # left side's max value multiply -1 will be right side's min value\n        # left's min value multiply -1 will be right's max value\n        pos_limit_mirror = []\n        if pos_limit:\n            for limits in pos_limit:\n                if limits:\n                    limits_mirror = [None, None]\n                    if limits[0] is not None:\n                        limits_mirror[1] = -limits[0]\n                    if limits[1] is not None:\n                        limits_mirror[0] = -limits[1]\n                    pos_limit_mirror.append(limits_mirror)\n                else:\n                    pos_limit_mirror.append(None)\n\n        # get mirrored position override\n        position_override_mirror = None\n        if position_override:\n            position_override_mirror = position_override.replace('_l_', '_r_')\n\n        # get mirrored connect driver\n        connect_driver_mirror = None\n        if connect_driver:\n            connect_driver_mirror = connect_driver.replace('_l_', '_r_')\n\n        # mirror blueprints\n        cmds.mirrorJoint(blueprint_joint, mirrorYZ=True, mirrorBehavior=True, searchReplace=['_l_', '_r_'])\n\n        # create muscle joint base on mirrored blueprint\n        create_muscle_joint(blueprint_joint.replace('_l_', '_r_'), parent_joint.replace('_l_', '_r_'),\n                            driver_joint.replace('_l_', '_r_'), position_override=position_override_mirror,\n                            up_vector=up_vector, skip_axis=skip_axis, pos_limit=pos_limit_mirror,\n                            volume_y=volume_y, volume_z=volume_z, connect_driver=connect_driver_mirror,\n                            connect_attrs=connect_attrs, connect_weight=connect_weight, mirror=False)\n\n\ncmds.confirmDialog(title=\"Success\", message=\"ok!\", button=[\"OK\"])" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "肌肉运行参数" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "肌肉运行参数" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "肌肉运行参数" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "# coding=utf-8\nfrom collections import OrderedDict\n\n\nmuscle_joints_info = OrderedDict()\nmuscle_joints_info.update({\n                           # neck\n                           'bpJnt_l_sternocleidomastoid_001': {'parent_joint': 'jnt_m_headLocal_001',  # 头部关节\n                                                               'driver_joint': 'jnt_m_sternum_001',\n                                                               'volume_y': 1,\n                                                               'volume_z': 1,\n                                                               'mirror': True},\n\n                           'bpJnt_l_sternocleidomastoid_002': {'parent_joint': 'jnt_m_headLocal_001',\n                                                               'driver_joint': 'jnt_l_clavicle_001',\n                                                               'volume_y': 1,\n                                                               'volume_z': 1,\n                                                               'mirror': True},\n\n                           'bpJnt_m_sternohyoid_001': {'parent_joint': 'jnt_m_headLocal_001',\n                                                       'driver_joint': 'jnt_m_sternum_001',\n                                                       'volume_y': 1,\n                                                       'volume_z': 1,\n                                                       'mirror': True},\n\n                           # back body\n                           'bpJnt_l_trapezius_001': {'parent_joint': 'jnt_m_headLocal_001',\n                                                     'driver_joint': 'jnt_l_scapula_001',\n                                                     'volume_y': 1,\n                                                     'volume_z': 1,\n                                                     'mirror': True},\n\n                           'bpJnt_l_trapezius_002': {'parent_joint': 'jnt_m_spine_006',\n                                                     'driver_joint': 'jnt_l_scapula_001',\n                                                     'volume_y': 1,\n                                                     'volume_z': 1,\n                                                     'mirror': True},\n\n                           'bpJnt_l_trapezius_003': {'parent_joint': 'jnt_m_spine_005',\n                                                     'driver_joint': 'jnt_l_scapula_001',\n                                                     'volume_y': 1,\n                                                     'volume_z': 1,\n                                                     'mirror': True},\n\n                           'bpJnt_l_latissimusDorsi_001': {'parent_joint': 'jnt_m_spine_002',\n                                                           'driver_joint': 'jnt_l_upperArmTwist_001',  # 大臂Twist第一个关节\n                                                           'volume_y': 1,\n                                                           'volume_z': 1,\n                                                           'mirror': True},\n\n                           # chest\n                           'bpJnt_l_pectoralis_001': {'parent_joint': 'jnt_l_clavicle_001',\n                                                      'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                      'volume_y': 1,\n                                                      'volume_z': 1,\n                                                      'pos_limit': [None, [0, None], None],\n                                                      'mirror': True},\n\n                           'bpJnt_l_pectoralis_002': {'parent_joint': 'jnt_m_sternum_001',\n                                                      'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                      'volume_y': 1,\n                                                      'volume_z': 1,\n                                                      'pos_limit': [None, [-5, None], None],\n                                                      'mirror': True},\n\n                           'bpJnt_l_pectoralis_003': {'parent_joint': 'jnt_m_sternum_001',\n                                                      'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                      'volume_y': 1,\n                                                      'volume_z': 1,\n                                                      'pos_limit': [None, [-5, None], None],\n                                                      'mirror': True},\n\n                          # lower body\n                          'bpJnt_l_externalOblique_001': {'parent_joint': 'jnt_m_pelvisIkLocal_001',  # 胯部关节\n                                                          'driver_joint': 'jnt_l_ribA_002',\n                                                          'volume_y': 0,\n                                                          'volume_z': 0,\n                                                          'mirror': True},\n\n                          'bpJnt_l_externalOblique_002': {'parent_joint': 'jnt_m_pelvisIkLocal_001',\n                                                          'driver_joint': 'jnt_l_ribB_003',\n                                                          'volume_y': 0.5,\n                                                          'volume_z': 0,\n                                                          'mirror': True},\n\n                          'bpJnt_m_rectusAbdominis_001': {'parent_joint': 'jnt_m_pelvisIkLocal_001',\n                                                          'driver_joint': 'jnt_m_sternum_001',\n                                                          'volume_y': 1,\n                                                          'volume_z': 0,\n                                                          'mirror': False},\n\n                          # scapula\n                          'bpJnt_l_infraspinatus_001': {'parent_joint': 'jnt_l_scapula_001',\n                                                        'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                        'volume_y': 1,\n                                                        'volume_z': 1,\n                                                        'mirror': True},\n\n                          'bpJnt_l_teresMajor_001': {'parent_joint': 'jnt_l_scapula_001',\n                                                     'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                     'volume_y': 1,\n                                                     'volume_z': 1,\n                                                     'mirror': True},\n\n                          # shoulder\n                          'bpJnt_l_deltoid_001': {'parent_joint': 'jnt_l_clavicle_001',\n                                                  'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                  'volume_y': 0.5,\n                                                  'volume_z': 0.5,\n                                                  'mirror': True},\n\n                          'bpJnt_l_deltoid_002': {'parent_joint': 'jnt_l_scapula_001',\n                                                  'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                  'volume_y': 0.5,\n                                                  'volume_z': 0.5,\n                                                  'mirror': True},\n\n                          'bpJnt_l_deltoid_003': {'parent_joint': 'jnt_l_scapula_001',\n                                                  'driver_joint': 'jnt_l_upperArmTwist_001',\n                                                  'volume_y': 0.5,\n                                                  'volume_z': 0.5,\n                                                  'mirror': True},\n\n                          # upper arm\n                          'bpJnt_l_bicepsBrachii_001': {'parent_joint': 'jnt_l_upperArmTwist_001',\n                                                        'driver_joint': 'jnt_l_upperArmTwist_005',\n                                                        'connect_driver': 'jnt_l_elbow_001',\n                                                        'connect_attrs': ['rotateY', 'translateX'],\n                                                        'connect_weight': 0.150,\n                                                        'volume_y': 2.5,\n                                                        'volume_z': 2.5,\n                                                        'mirror': True},\n\n                          'bpJnt_l_tricepsBrachii_001': {'parent_joint': 'jnt_l_upperArmTwist_001',\n                                                         'driver_joint': 'jnt_l_upperArmTwist_005',\n                                                         'connect_driver': 'jnt_l_elbow_001',\n                                                         'connect_attrs': ['rotateY', 'translateX'],\n                                                         'connect_weight': -0.03,\n                                                         'volume_y': 2,\n                                                         'volume_z': 2,\n                                                         'mirror': True},\n\n                          'bpJnt_l_brachialis_001': {'parent_joint': 'jnt_l_upperArmTwist_002',\n                                                     'driver_joint': 'jnt_l_upperArmTwist_005',\n                                                     'connect_driver': 'jnt_l_elbow_001',\n                                                     'volume_y': 2,\n                                                     'volume_z': 2,\n                                                     'connect_attrs': ['rotateY', 'translateX'],\n                                                     'connect_weight': 0.1,\n                                                     'mirror': True},\n\n                          # elbow arm\n                          'bpJnt_l_brachioradialis_001': {'parent_joint': 'jnt_l_elbowTwist_001',  # 小臂Twist第一个关节\n                                                          'driver_joint': 'jnt_l_elbowTwist_005',\n                                                          'position_override': 'jnt_l_upperArmTwist_005',\n                                                          'volume_y': 2,\n                                                          'volume_z': 2,\n                                                          'mirror': True},\n\n                          'bpJnt_l_extensorCarpiRadialisLongus_001': {'parent_joint': 'jnt_l_elbowTwist_001',\n                                                                      'driver_joint': 'jnt_l_wrist_001',\n                                                                      'volume_y': 1,\n                                                                      'volume_z': 1,\n                                                                      'pos_limit': [None, [0, None], None],\n                                                                      'mirror': True},\n\n                          'bpJnt_l_flexorCarpiRadialis_001': {'parent_joint': 'jnt_l_elbowTwist_001',\n                                                              'driver_joint': 'jnt_l_wrist_001',\n                                                              'volume_y': 1,\n                                                              'volume_z': 1,\n                                                              'pos_limit': [None, [0, None], None],\n                                                              'mirror': True},\n\n                          # pelvis\n                          'bpJnt_l_gluteusMedius_001': {'parent_joint': 'jnt_m_pelvisIkLocal_001',\n                                                        'driver_joint': 'jnt_l_upperLegTwist_001',  # 大腿Twist第一关节\n                                                        'volume_y': 1,\n                                                        'volume_z': 0,\n                                                        'mirror': True},\n\n                          'bpJnt_l_gluteusMaximus_001': {'parent_joint': 'jnt_m_pelvisIkLocal_001',\n                                                         'driver_joint': 'jnt_l_upperLegTwist_001',\n                                                         'volume_y': 1,\n                                                         'volume_z': 1,\n                                                         'mirror': True},\n\n                          # upper leg\n                          'bpJnt_l_rectusFemoris_001': {'parent_joint': 'jnt_l_upperLegTwist_001',\n                                                        'driver_joint': 'jnt_l_upperLegTwist_005',\n                                                        'connect_driver': 'jnt_l_knee_001',\n                                                        'volume_y': 1,\n                                                        'volume_z': 1,\n                                                        'connect_attrs': ['rotateZ', 'translateX'],\n                                                        'connect_weight': -0.05,\n                                                        'mirror': True},\n\n                          'bpJnt_l_vastusLateralis_001': {'parent_joint': 'jnt_l_upperLegTwist_001',\n                                                          'driver_joint': 'jnt_l_upperLegTwist_005',\n                                                          'connect_driver': 'jnt_l_knee_001',\n                                                          'volume_y': 1,\n                                                          'volume_z': 1,\n                                                          'connect_attrs': ['rotateZ', 'translateX'],\n                                                          'connect_weight': -0.05,\n                                                          'mirror': True},\n\n                          'bpJnt_l_semitendinosus_001': {'parent_joint': 'jnt_l_upperLegTwist_001',\n                                                         'driver_joint': 'jnt_l_upperLegTwist_005',\n                                                         'connect_driver': 'jnt_l_knee_001',\n                                                         'volume_y': 2,\n                                                         'volume_z': 2,\n                                                         'connect_attrs': ['rotateZ', 'translateX'],\n                                                         'connect_weight': 0.1,\n                                                         'mirror': True},\n\n                          'bpJnt_l_bicepsFemoris_001': {'parent_joint': 'jnt_l_upperLegTwist_001',\n                                                        'driver_joint': 'jnt_l_upperLegTwist_005',\n                                                        'connect_driver': 'jnt_l_knee_001',\n                                                        'volume_y': 2,\n                                                        'volume_z': 2,\n                                                        'connect_attrs': ['rotateZ', 'translateX'],\n                                                        'connect_weight': 0.1,\n                                                        'mirror': True},\n\n                          'bpJnt_l_adductorLongus_001': {'parent_joint': 'jnt_m_pelvisIkLocal_001',\n                                                         'driver_joint': 'jnt_l_upperLegTwist_003',\n                                                         'volume_y': 1,\n                                                         'volume_z': 1,\n                                                         'mirror': True},\n\n                          'bpJnt_l_gracilis_001': {'parent_joint': 'jnt_m_pelvisIkLocal_001',\n                                                   'driver_joint': 'jnt_l_upperLegTwist_005',\n                                                   'volume_y': 1,\n                                                   'volume_z': 1,\n                                                   'mirror': True},\n\n                          # lower leg\n                          'bpJnt_l_extensorDigitorumLongus_001': {'parent_joint': 'jnt_l_kneeTwist_001',  # 小腿Twist第一关节\n                                                                  'driver_joint': 'jnt_l_ankle_001',\n                                                                  'volume_y': 1,\n                                                                  'volume_z': 1,\n                                                                  'pos_limit': [None, [0, None], None],\n                                                                  'mirror': True},\n\n                          'bpJnt_l_achillesTendon_001': {'parent_joint': 'jnt_l_kneeTwist_003',\n                                                         'driver_joint': 'jnt_l_ankle_001',\n                                                         'volume_y': 0,\n                                                         'volume_z': 0,\n                                                         'pos_limit': [None, [0, None], None],\n                                                         'mirror': True}})\n\nmuscle_joints_info.update({\n                          'bpJnt_l_gastrocnemius_001': {'parent_joint': 'jnt_l_kneeTwist_001',\n                                                        'driver_joint': 'jnt_l_achillesTendon_001',\n                                                        'volume_y': 2,\n                                                        'volume_z': 2,\n                                                        'mirror': True},\n\n                          'bpJnt_l_gastrocnemius_002': {'parent_joint': 'jnt_l_kneeTwist_001',\n                                                        'driver_joint': 'jnt_l_achillesTendon_001',\n                                                        'volume_y': 2,\n                                                        'volume_z': 2,\n                                                        'mirror': True}})\n\nfor bp_jnt, muscle_data in muscle_joints_info.items():\n    parent_jnt = muscle_data.get('parent_joint', None)\n    driver_jnt = muscle_data.get('driver_joint', None)\n    position_override = muscle_data.get('position_override', None)\n    up_vector = muscle_data.get('up_vector', None)\n    skip_axis = muscle_data.get('skip_axis', None)\n    pos_limit = muscle_data.get('pos_limit', None)\n    volume_y = muscle_data.get('volume_y', 0.5)\n    volume_z = muscle_data.get('volume_z', 0.5)\n    connect_driver = muscle_data.get('connect_driver', None)\n    connect_attrs = muscle_data.get('connect_attrs', None)\n    connect_weight = muscle_data.get('connect_weight', 1)\n    mirror = muscle_data.get('mirror', True)\n\n    create_muscle_joint(bp_jnt, parent_jnt, driver_jnt, position_override=position_override, up_vector=up_vector,\n                        skip_axis=skip_axis, pos_limit=pos_limit, volume_y=volume_y, volume_z=volume_z,\n                        connect_driver=connect_driver, connect_attrs=connect_attrs, connect_weight=connect_weight,\n                        mirror=mirror)\n\ncmds.confirmDialog(title=\"Success\", message=\"ok!\", button=[\"OK\"])\n" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "选择肌肉骨骼" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "选择肌肉骨骼" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "选择肌肉骨骼" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import maya.cmds as cmds\n\nbp_jnts = cmds.listRelatives('grp_m_muscleJointsBlueprints_001')\n\njnts = []\n\nfor bp in bp_jnts:\n\tj = bp.replace('bpJnt', 'jnt')\n\tjnts.append(j)\n\tif '_l_' in j:\n\t\t\tj_r = j.replace('_l_', '_r_')\n\t\t\tjnts.append(j_r)\n\t\t\ncmds.select(jnts)" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "抖动肌肉" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "抖动肌肉" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "抖动肌肉" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "import string\nimport maya.cmds as cmds\n\n\ndef make_spline(side, description, index, ctrl_num=3, jnt_num=5, control_mid=True):\n    \"\"\"\n    create cMuscleSpline\n\n    This script is simply convert from Maya muscle's mel script\n    the mel script location is /Autodesk/Maya2020/scripts/muscle/cMuscleSplineUI.mel, line 660 cMS_makeSpline\n\n    made some changes with the naming to fit current pipeline\n    add some global offset attr so user can plug into global control to do some overall control\n\n    Args:\n        side(str): muscle spline's side, 'l', 'r' or 'm'\n        description(str): muscle spline's description\n        index(i): muscle spline's index\n        ctrl_num(i): how many controls needed, default is 3\n        jnt_num(i): how many joints needed, default is 5\n        control_mid(bool): the start/end control will control in-between controls with falloff, default is True\n\n    Returns:\n        spline(str): cMuscleSpline node name\n        controls(list): spline controls\n        joints(list): spline joints\n        group(str): root group for the spline setup\n    \"\"\"\n    # make master groups\n    grp_main = cmds.createNode('transform',\n                               name='grp_{}_{}MusSpline_{:03d}'.format(side, description, index))\n\n    # c muscle spline node\n    base_name = 'cMuscleSpline_{}_{}MusSpline_{:03d}Shape'.format(side, description, index)\n    spline = cmds.createNode('cMuscleSpline',\n                             name=cmds.ls(base_name, exactType='cMuscleSpline') and (base_name + '_1') or base_name)\n\n    # lock label attrs\n    cmds.setAttr(spline + '.DISPLAY', lock=True)\n    cmds.setAttr(spline + '.TANGENTS', lock=True)\n    cmds.setAttr(spline + '.LENGTH', lock=True)\n\n    # get the transform node of spline shape and parent it under master group\n    transform_spline = cmds.listRelatives(spline, parent=True)[0]\n    cmds.parent(transform_spline, grp_main)\n    # set inheritsTransform to 0 to avoid double transformation\n    cmds.setAttr(transform_spline + '.inheritsTransform', 0)\n    # lock the attrs because it shouldn't move\n    for attr in 'trs':\n        for axis in 'xyz':\n            cmds.setAttr('{}.{}{}'.format(transform_spline, attr, axis), lock=True, keyable=False)\n    # connect time to drive the spline\n    cmds.connectAttr('time1.outTime', spline + '.inTime', force=True)\n    # create some attrs so user can view easily in channel box\n    cmds.addAttr(spline, longName='curLen', keyable=True)\n    cmds.connectAttr(spline + '.outLen', spline + '.curLen')\n\n    # add squash/stretch volume attr to connect with other controller\n    cmds.addAttr(spline, longName='squashXMult', attributeType='float', minValue=0, defaultValue=1)\n    cmds.addAttr(spline, longName='squashZMult', attributeType='float', minValue=0, defaultValue=1)\n    cmds.addAttr(spline, longName='stretchXMult', attributeType='float', minValue=0, defaultValue=1)\n    cmds.addAttr(spline, longName='stretchZMult', attributeType='float', minValue=0, defaultValue=1)\n\n    # add global attr so it can be easily plugged with global control\n    cmds.addAttr(spline, longName='jiggleMult', defaultValue=1)\n    cmds.addAttr(spline, longName='jiggleXMult', defaultValue=1)\n    cmds.addAttr(spline, longName='jiggleYMult', defaultValue=1)\n    cmds.addAttr(spline, longName='jiggleZMult', defaultValue=1)\n    cmds.addAttr(spline, longName='jiggleImpactMult', defaultValue=1)\n\n    # ctrl grp\n    grp_ctrls_name = 'grp_{}_{}MusSplineControls_{:03d}'.format(side, description, index)\n    if not cmds.objExists(grp_ctrls_name):\n        grp_ctrls = cmds.createNode('transform', name=grp_ctrls_name)\n    else:\n        print(f\"Warning: {grp_ctrls_name} already exists. Skipping creation.\")\n\n    cmds.parent(grp_ctrls, grp_main)\n    for attr in 'trs':\n        for axis in 'xyz':\n            cmds.setAttr('{}.{}{}'.format(grp_ctrls, attr, axis), lock=True, keyable=False)\n\n    # driven grp for joints\n    grp_driven = cmds.createNode('transform',\n                                 name='grp_{}_{}MusSplineJoints_{:03d}'.format(side, description, index))\n    cmds.parent(grp_driven, grp_main)\n    cmds.setAttr(grp_driven + '.inheritsTransform', 0)\n    for attr in 'trs':\n        for axis in 'xyz':\n            cmds.setAttr('{}.{}{}'.format(grp_driven, attr, axis), lock=True, keyable=False)\n\n    ctrls = []\n    # make controls\n    for i in range(ctrl_num):\n        ctrl_name = 'ctrl_{}_{}MusSpline{}_{:03d}'.format(side, description, string.ascii_uppercase[i], index)\n\n        # create curve\n        ctrl = cmds.curve(point=[[-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, -0.5, -0.5],\n                                 [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5], [0.5, -0.5, -0.5],\n                                 [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5],\n                                 [-0.5, 0.5, 0.5], [-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5]],\n                          degree=1,\n                          knot=[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0],\n                          name=ctrl_name)\n        # rename curve shape\n        cmds.rename(cmds.listRelatives(ctrl, shapes=True)[0], ctrl_name + 'Shape')\n\n        # add to list\n        ctrls.append(ctrl)\n\n        # make control hierarchy\n        ctrl_nodes = []\n        for node_type in ['zero', 'driven', 'connect', 'offset']:\n            grp = cmds.createNode('transform', name=ctrl.replace('ctrl', node_type))\n            ctrl_nodes.append(grp)\n\n        # parent hierarchy\n        cmds.parent(ctrl, ctrl_nodes[-1])\n        cmds.parent(ctrl_nodes[-1], ctrl_nodes[-2])\n        cmds.parent(ctrl_nodes[-2], ctrl_nodes[1])\n        cmds.parent(ctrl_nodes[1], ctrl_nodes[0])\n\n        # store zero node to variable\n        zero = ctrl_nodes[0]\n\n        # place controls vertically\n        cmds.setAttr(zero + '.translateY', i)\n\n        # parent zero group to control group\n        cmds.parent(zero, grp_ctrls)\n\n        # color control\n        ctrl_shape = cmds.listRelatives(ctrl, shapes=True)[0]\n        cmds.setAttr(ctrl_shape + '.overrideEnabled', 1)\n\n        if side == 'l':\n            color = 28\n        elif side == 'r':\n            color = 31\n        else:\n            color = 26\n        cmds.setAttr(ctrl_shape + '.overrideColor', color)\n\n        # add jiggle value, make sure start and end not jiggle\n        if 0 < i < ctrl_num - 1:\n            jiggle = 1\n        else:\n            jiggle = 0\n\n        # add attrs\n        cmds.addAttr(ctrl, longName='tangentLength', shortName='tanlen', minValue=0, defaultValue=1, keyable=True)\n        cmds.addAttr(ctrl, longName='jiggle', shortName='jig', defaultValue=jiggle, minValue=0, keyable=True)\n        cmds.addAttr(ctrl, longName='jiggleX', shortName='jigx', defaultValue=jiggle, minValue=0, keyable=True)\n        cmds.addAttr(ctrl, longName='jiggleY', shortName='jigy', defaultValue=jiggle * 0.25, minValue=0, keyable=True)\n        cmds.addAttr(ctrl, longName='jiggleZ', shortName='jigz', defaultValue=jiggle, minValue=0, keyable=True)\n        cmds.addAttr(ctrl, longName='jiggleImpact', shortName='jigimp', defaultValue=jiggle * 0.5, minValue=0,\n                     keyable=True)\n        cmds.addAttr(ctrl, longName='jiggleImpactStart', shortName='jigimpst', defaultValue=1000, minValue=0,\n                     keyable=True)\n        cmds.addAttr(ctrl, longName='jiggleImpactStop', shortName='jigimpsp', defaultValue=0.001, minValue=0,\n                     keyable=True)\n        cmds.addAttr(ctrl, longName='cycle', shortName='cyc', minValue=1, defaultValue=12, keyable=True)\n        cmds.addAttr(ctrl, longName='rest', shortName='rst', minValue=1, defaultValue=24, keyable=True)\n\n        # lock hide scale and vis\n        for attr in ['sx', 'sy', 'sz', 'v']:\n            cmds.setAttr('{}.{}'.format(ctrl, attr), lock=True, keyable=False)\n\n        # connect attr\n        cmds.connectAttr(ctrl + '.worldMatrix[0]', '{}.controlData[{}].insertMatrix'.format(spline, i))\n\n        # connect jiggle attr with global mult attr, then plug into controlData\n        for attr in ['jiggle', 'jiggleX', 'jiggleY', 'jiggleZ', 'jiggleImpact']:\n            # mult node\n            mult = 'mult_{}_{}MusSpline{}{}{}_{:03d}'.format(side, description, string.ascii_uppercase[i],\n                                                             attr[0].upper(), attr[1:], index)\n            cmds.createNode('multDoubleLinear', name=mult)\n            cmds.connectAttr('{}.{}'.format(ctrl, attr), mult + '.input1')\n            cmds.connectAttr('{}.{}Mult'.format(spline, attr), mult + '.input2')\n\n            # connect output to controlData\n            cmds.connectAttr(mult + '.output', '{}.controlData[{}].{}'.format(spline, i, attr))\n\n        # connect other attrs directly into controlData\n        for attr in ['tangentLength', 'jiggleImpactStart', 'jiggleImpactStop', 'cycle', 'rest']:\n            cmds.connectAttr('{}.{}'.format(ctrl, attr), '{}.controlData[{}].{}'.format(spline, i, attr))\n\n    # control mid points\n    if control_mid:\n        for i in range(1, ctrl_num - 1):\n            # get weight value\n            weight = i / float(ctrl_num - 1)\n\n            # get driven group\n            driven = ctrls[i].replace('ctrl', 'driven')\n\n            # point constraint with start and end\n            pont_con = cmds.pointConstraint(ctrls[0], ctrls[-1], driven, maintainOffset=False)[0]\n            cmds.setAttr('{}.{}W0'.format(pont_con, ctrls[0]), 1 - weight)\n            cmds.setAttr('{}.{}W1'.format(pont_con, ctrls[-1]), weight)\n\n            # aim constraint dummy node to start and end, and blend to ctrl's orient\n            grp_aim_start = 'grp_{}_{}MusSpline{}AimStart_{:03d}'.format(side, description,\n                                                                         string.ascii_uppercase[i], index)\n            grp_aim_end = 'grp_{}_{}MusSpline{}AimEnd_{:03d}'.format(side, description,\n                                                                     string.ascii_uppercase[i], index)\n\n            cmds.createNode('transform', name=grp_aim_start)\n            cmds.createNode('transform', name=grp_aim_end)\n\n            # snap to control's position\n            cmds.matchTransform(grp_aim_start, grp_aim_end, driven, pos=True, rot=True)\n            # parent dummy groups under zero\n            cmds.parent(grp_aim_start, grp_aim_end, driven.replace('driven', 'zero'))\n\n            # aim constraint with start and end\n            aim_start = cmds.aimConstraint(ctrls[0], grp_aim_start, aimVector=[0, -1, 0], upVector=[1, 0, 0],\n                                           worldUpVector=[1, 0, 0], worldUpType='objectrotation',\n                                           worldUpObject=ctrls[0], maintainOffset=False)[0]\n            aim_end = cmds.aimConstraint(ctrls[-1], grp_aim_end, aimVector=[0, 1, 0], upVector=[1, 0, 0],\n                                         worldUpVector=[1, 0, 0], worldUpType='objectrotation',\n                                         worldUpObject=ctrls[-1], maintainOffset=False)[0]\n\n            # add blend attr to chose either aim with x up or z up\n            blend = 'blend_{}_{}MusSpline{}AimUp_{:03d}'.format(side, description,\n                                                                string.ascii_uppercase[i], index)\n            if not cmds.objExists(blend):\n                cmds.createNode('blendColors', name=blend)\n                cmds.connectAttr(spline + '.upAxis', blend + '.blender')\n                cmds.setAttr(blend + '.color1', 0, 0, 1)\n                cmds.setAttr(blend + '.color2', 1, 0, 0)\n\n            # connect blend to aim constraint\n            for attr in ['upVector', 'worldUpVector']:\n                cmds.connectAttr(blend + '.output', '{}.{}'.format(aim_start, attr))\n                cmds.connectAttr(blend + '.output', '{}.{}'.format(aim_end, attr))\n\n            # connect point constraint's output to dummy groups since they are the same place with driver\n            for attr in ['translateX', 'translateY', 'translateZ']:\n                for grp in [grp_aim_start, grp_aim_end]:\n                    cmds.connectAttr('{}.constraint{}{}'.format(pont_con, attr[0].upper(), attr[1:]),\n                                     '{}.{}'.format(grp, attr))\n\n            # orient constraint dummy groups with driver\n            ont_con = cmds.orientConstraint(grp_aim_start, grp_aim_end, driven, maintainOffset=False)[0]\n            cmds.setAttr(ont_con + '.interpType', 2)\n            cmds.setAttr('{}.{}W0'.format(ont_con, grp_aim_start), 1 - weight)\n            cmds.setAttr('{}.{}W1'.format(ont_con, grp_aim_end), weight)\n\n    # create joints\n    jnts = []\n    for i in range(jnt_num):\n        # get u value\n        u_val = i / float(jnt_num - 1)\n\n        # joint name\n        jnt = 'jnt_{}_{}MusSpline{:03d}_{:03d}'.format(side, description, i + 1, index)\n\n        # create joint\n        cmds.createNode('joint', name=jnt)\n\n        # append to jnts list\n        jnts.append(jnt)\n\n        # add uValue to joint\n        cmds.addAttr(jnt, longName='uValue', minValue=0, maxValue=1, defaultValue=u_val, keyable=True)\n\n        # parent to driven group\n        cmds.parent(jnt, grp_driven)\n\n        # connect attr\n        cmds.connectAttr(jnt + '.uValue', '{}.readData[{}].readU'.format(spline, i))\n        cmds.connectAttr(jnt + '.rotateOrder', '{}.readData[{}].readRotOrder'.format(spline, i))\n        cmds.connectAttr('{}.outputData[{}].outTranslate'.format(spline, i), jnt + '.translate')\n        cmds.connectAttr('{}.outputData[{}].outRotate'.format(spline, i), jnt + '.rotate')\n\n        # add scale x, z\n        # get scale weight, the middle point should be 1, and falloff till the start/end point\n        mid_num = (jnt_num - 1) * 0.5\n        scale_weight = 1 - (abs(mid_num - i) / float(mid_num))**2\n        if scale_weight != 0:\n            # not the start/end point\n\n            # add scale x and scale z attr to spline so user can tweak individually\n            cmds.addAttr(spline, longName='joint{:03d}SquashX'.format(i + 1), attributeType='float', minValue=0,\n                         defaultValue=1 + scale_weight, keyable=True)\n            cmds.addAttr(spline, longName='joint{:03d}StretchX'.format(i + 1), attributeType='float', minValue=0,\n                         defaultValue=1 - scale_weight * 0.9, keyable=True)\n            cmds.addAttr(spline, longName='joint{:03d}SquashZ'.format(i + 1), attributeType='float', minValue=0,\n                         defaultValue=1 + scale_weight, keyable=True)\n            cmds.addAttr(spline, longName='joint{:03d}StretchZ'.format(i + 1), attributeType='float', minValue=0,\n                         defaultValue=1 - scale_weight * 0.9, keyable=True)\n\n            # add blend node to blend squash stretch\n            blend_squash = 'blend_{}_{}MusSplineSquash{:03d}_{:03d}'.format(side, description, i + 1, index)\n            blend_stretch = 'blend_{}_{}MusSplineStretch{:03d}_{:03d}'.format(side, description, i + 1, index)\n\n            cmds.createNode('blendColors', name=blend_squash)\n            cmds.createNode('blendColors', name=blend_stretch)\n\n            # connect blender with spline's outPctSquash/Stretch\n            cmds.connectAttr(spline + '.outPctSquash', blend_squash + '.blender')\n            cmds.connectAttr(spline + '.outPctStretch', blend_stretch + '.blender')\n            cmds.setAttr(blend_squash + '.color2', 1, 1, 1)\n            cmds.setAttr(blend_stretch + '.color2', 1, 1, 1)\n\n            # mult node to multiply individual joint squash and stretch with global mult\n            mult_squash = 'mult_{}_{}MusSplineSquash{:03d}_{:03d}'.format(side, description, i + 1, index)\n            mult_stretch = 'mult_{}_{}MusSplineStretch{:03d}_{:03d}'.format(side, description, i + 1, index)\n\n            cmds.createNode('multiplyDivide', name=mult_squash)\n            cmds.createNode('multiplyDivide', name=mult_stretch)\n\n            cmds.connectAttr('{}.joint{:03d}SquashX'.format(spline, i + 1), mult_squash + '.input1X')\n            cmds.connectAttr('{}.joint{:03d}SquashZ'.format(spline, i + 1), mult_squash + '.input1Z')\n            cmds.connectAttr('{}.joint{:03d}StretchX'.format(spline, i + 1), mult_stretch + '.input1X')\n            cmds.connectAttr('{}.joint{:03d}StretchZ'.format(spline, i + 1), mult_stretch + '.input1Z')\n            cmds.connectAttr(spline + '.squashXMult', mult_squash + '.input2X')\n            cmds.connectAttr(spline + '.squashZMult', mult_squash + '.input2Z')\n            cmds.connectAttr(spline + '.stretchXMult', mult_stretch + '.input2X')\n            cmds.connectAttr(spline + '.stretchZMult', mult_stretch + '.input2Z')\n\n            # connect to blend colors input1X\n            cmds.connectAttr(mult_squash + '.output', blend_squash + '.color1')\n            cmds.connectAttr(mult_stretch + '.output', blend_stretch + '.color1')\n\n            # plus node to add scale together\n            plus = 'plus_{}_{}MusSplineSquashStretch{:03d}_{:03d}'.format(side, description, i + 1, index)\n            cmds.createNode('plusMinusAverage', name=plus)\n            cmds.connectAttr(blend_squash + '.output', plus + '.input3D[0]')\n            cmds.connectAttr(blend_stretch + '.output', plus + '.input3D[1]')\n            cmds.setAttr(plus + '.input3D[2]', -1, -1, -1)\n\n            # multiply node to mult global scale\n            mult_scale = 'mult_{}_{}MusSplineScale{:03d}_{:03d}'.format(side, description, i + 1, index)\n            cmds.createNode('multiplyDivide', name=mult_scale)\n            cmds.connectAttr(plus + '.output3D', mult_scale + '.input1')\n            cmds.connectAttr(spline + '.userScale', mult_scale + '.input2X')\n            cmds.connectAttr(spline + '.userScale', mult_scale + '.input2Y')\n            cmds.connectAttr(spline + '.userScale', mult_scale + '.input2Z')\n\n            # connect back to joint\n            cmds.connectAttr(mult_scale + '.outputX', jnt + '.scaleX')\n            cmds.connectAttr(mult_scale + '.outputZ', jnt + '.scaleZ')\n            cmds.connectAttr(spline + '.userScale', jnt + '.scaleY')\n\n        else:\n            cmds.connectAttr(spline + '.userScale', jnt + '.scaleX')\n            cmds.connectAttr(spline + '.userScale', jnt + '.scaleY')\n            cmds.connectAttr(spline + '.userScale', jnt + '.scaleZ')\n\n    # set squash stretch values\n    # get length\n    length = cmds.getAttr(spline + '.outLen')\n    # set default length\n    cmds.setAttr(spline + '.lenDefault', length)\n    # stretch and squash\n    cmds.setAttr(spline + '.lenSquash', length * 0.25)\n    cmds.setAttr(spline + '.lenStretch', length * 2.5)\n\n    return spline, ctrls, jnts, grp_main\n\n\ndef add_spline(mus_joint, joint_number=5, control_number=3, control_mid=True, mirror=True, scale_attr=None):\n    \"\"\"\n    add cMuscle spline setup to given muscle joint\n\n    Args:\n        mus_joint (str): muscle joint need to add cMuscle spline setup\n        joint_number (int): cMuscle spline joints number\n        control_number (int): cMuscle spline controls number\n        control_mid (bool): constraint the mid controller with start/end controller, default is True\n        mirror (bool): mirror to the right side\n        scale_attr (str): global scale attribute\n    \"\"\"\n    # get name parts\n    name_parts = mus_joint.split('_')\n    side = name_parts[1]\n    description = name_parts[2]\n    index = int(name_parts[3])\n\n    # get muscle info\n    mus_group = cmds.listRelatives(mus_joint, parent=True)[0]\n    end_joint = cmds.listRelatives(mus_joint, children=True, type='joint')[0]\n    # 查找与指定规则匹配的节点\n    aim_locator_candidates = cmds.ls('loc_{}_{}*Target_{:03d}'.format(side, description, index))\n    if aim_locator_candidates:\n        aim_locator = aim_locator_candidates[0]  # 取第一个匹配的节点\n    else:\n        raise RuntimeError(f\"No aim locator found for side '{side}', description '{description}', index '{index}'\")\n\n    grp_locator = aim_locator.replace('loc_', 'driven_')\n    pnt_con = cmds.listConnections(grp_locator, source=True, destination=False, plugs=False)[0]\n    driver_node = cmds.listConnections(pnt_con + '.target[0].targetTranslate', source=True, destination=False,\n                                       plugs=False)[0]\n\n    # get world up vector\n    aim_vector = [1, 0, 0]\n    world_up_vector = [0, 1, 0]\n    if side == 'r':\n        aim_vector = [-1, 0, 0]\n        world_up_vector = [0, -1, 0]\n\n    # create cMuscle spline\n    spline_node, ctrls, jnts, grp_spline = make_spline(side, description, index, ctrl_num=control_number,\n                                                       jnt_num=joint_number, control_mid=control_mid)\n\n    # create pos group to present muscle joint's position\n    grp_pos = 'zero_{}_{}MusSpline_{:03d}'.format(side, description, index)\n    cmds.createNode('transform', name=grp_pos)\n    cmds.matchTransform(grp_pos, mus_joint, position=True, rotation=True)\n    cmds.parent(grp_pos, mus_group)\n\n    # connect with muscle joint's position\n    cmds.connectAttr(mus_joint + '.translate', grp_pos + '.translate')\n    cmds.connectAttr(mus_joint + '.rotate', grp_pos + '.rotate')\n\n    # parent to muscle joint\n    cmds.parent(grp_spline, grp_pos)\n    # snap the position\n    cmds.matchTransform(grp_spline, grp_pos, position=True, rotation=True)\n    # do a temp aim constraint to orient the group\n    cmds.delete(cmds.aimConstraint(end_joint, grp_spline, aimVector=[0, 1, 0], upVector=[-1, 0, 0],\n                                   worldUpType='objectrotation', worldUpObject=mus_joint,\n                                   worldUpVector=world_up_vector, maintainOffset=False))\n\n    # snap each control to its position\n    # snap the end control\n    cmds.matchTransform(ctrls[-1].replace('ctrl', 'zero'), end_joint, position=True, rotation=False)\n\n    # snap the in-between so driven node will get lesser offset value\n    for i in range(1, control_number - 1):\n        # get weight value\n        weight = i / float(control_number - 1)\n\n        # get zero group\n        zero = ctrls[i].replace('ctrl', 'zero')\n\n        # point constraint with start and end\n        pnt_con = cmds.pointConstraint(ctrls[0], ctrls[-1], zero, maintainOffset=False)[0]\n        cmds.setAttr('{}.{}W0'.format(pnt_con, ctrls[0]), 1 - weight)\n        cmds.setAttr('{}.{}W1'.format(pnt_con, ctrls[-1]), weight)\n\n        # delete point constraint\n        cmds.delete(pnt_con)\n\n    # point constraint end control driven with muscle joint's end joint\n    ctrl_end_driven = ctrls[-1].replace('ctrl', 'driven')\n    cmds.pointConstraint(aim_locator, ctrl_end_driven, maintainOffset=False)\n\n    # reverse aim set up for end control\n    aim_node = cmds.createNode('transform', name='grp_{}_{}EndAim_{:03d}'.format(side, description, index))\n    zero_aim_node = cmds.createNode('transform', name=aim_node.replace('grp', 'zero'))\n    cmds.parent(aim_node, zero_aim_node)\n\n    cmds.matchTransform(zero_aim_node, end_joint, position=True)\n\n    # parent to driver node\n    cmds.parent(zero_aim_node, driver_node)\n\n    # temp aim back to muscle group to get orientation\n    cmds.delete(cmds.aimConstraint(mus_joint, zero_aim_node, maintainOffset=False,\n                                   aimVector=aim_vector, upVector=world_up_vector,\n                                   worldUpType='objectrotation', worldUpVector=world_up_vector))\n\n    cmds.pointConstraint(aim_locator, aim_node, maintainOffset=False)\n    cmds.aimConstraint(mus_group, aim_node, maintainOffset=False, aimVector=aim_vector,\n                       upVector=world_up_vector, worldUpType='none')\n\n    # add offset transform\n    offset_grp = cmds.createNode('transform', name='grp_{}_{}EndAimOffset_{:03d}'.format(side, description, index))\n    cmds.parent(offset_grp, aim_node)\n    cmds.matchTransform(offset_grp, ctrl_end_driven, position=True, rotation=True)\n    # orient constraint with end control's driven node\n    cmds.orientConstraint(offset_grp, ctrl_end_driven, maintainOffset=False)\n\n    # reset curve length and stretch squash limit\n    # get default curve length\n    crv_length = cmds.getAttr(spline_node + '.curLen')\n    # set as default\n    cmds.setAttr(spline_node + '.lenDefault', crv_length)\n    # set stretch and squash limit\n    cmds.setAttr(spline_node + '.lenStretch', crv_length * 2)\n    cmds.setAttr(spline_node + '.lenSquash', crv_length * 0.5)\n\n    # connect global scale\n    if scale_attr:\n        cmds.connectAttr(scale_attr, spline_node + '.userScale')\n\n    # hide muscle joints\n    cmds.setAttr(mus_joint + '.visibility', 0)\n\n    if mirror and side == 'l':\n        add_spline(mus_joint.replace('_l_', '_r_'), joint_number=joint_number, control_number=control_number,\n                   control_mid=control_mid, mirror=False, scale_attr=scale_attr)\n\n\ndef mirror_muscle_spline_settings():\n    \"\"\"\n    mirror cMuscleSpline settings from left to right\n    \"\"\"\n    # get all left side muscle spline node and muscle spline controllers\n    spline_nodes = cmds.ls('cMuscleSpline_l_*MusSpline_???Shape')\n    spline_ctrls = cmds.ls('ctrl_l_*MusSpline?_???')\n\n    # loop in each node\n    for node in spline_nodes + spline_ctrls:\n        node_right = node.replace('_l_', '_r_')\n        # get all custom attrs\n        attrs = cmds.listAttr(node, userDefined=True)\n        for attr in attrs:\n            # check if it has connection or locked\n            node_attr = '{}.{}'.format(node, attr)\n            if not cmds.listConnections(node_attr, source=True, destination=False) and \\\n                    not cmds.getAttr(node_attr, lock=True):\n                val = cmds.getAttr(node_attr)\n                cmds.setAttr('{}.{}'.format(node_right, attr), val)\n" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "抖动肌肉运行" 
+        -enableBackground 0
+        -backgroundColor 0 0 0 
+        -highlightColor 0.321569 0.521569 0.65098 
+        -align "center" 
+        -label "抖动肌肉运行" 
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "抖动肌肉运行" 
+        -overlayLabelColor 0.8 0.8 0.8 
+        -overlayLabelBackColor 0 0 0 0.5 
+        -image "pythonFamily.png" 
+        -image1 "pythonFamily.png" 
+        -style "iconOnly" 
+        -marginWidth 0
+        -marginHeight 1
+        -command "# 确保蓝图关节组存在\nif cmds.objExists('grp_m_muscleJointsBlueprints_001'):\n    # 获取子节点\n    bps = cmds.listRelatives('grp_m_muscleJointsBlueprints_001', children=True) or []\n    for bp in bps:\n        # 替换名称\n        jnt = bp.replace('bpJnt', 'jnt')\n        if cmds.objExists(jnt):\n            try:\n                # 添加肌肉样条\n                add_spline(jnt, scale_attr='ctrl_m_world_001.rigScale')\n            except Exception as e:\n                print(f\"Error processing '{jnt}': {e}\")\n        else:\n            print(f\"Warning: Joint '{jnt}' does not exist.\")\nelse:\n    print(\"Error: Group 'grp_m_muscleJointsBlueprints_001' does not exist.\")\n" 
+        -sourceType "python" 
+        -commandRepeatable 1
+        -flat 1
+    ;
+
+} 
