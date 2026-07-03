@@ -1,0 +1,33 @@
+geometry 模型
+controls 控制
+Nodes 节点
+
+Local 本地  简称（loc）
+World 世界
+
+Driver 驱动
+Driven被驱动
+SDK 驱动关键帧（Set Driven Key）
+
+zero 零
+driven 被驱动
+connect 连接
+offset 偏移
+space 空间 （空间切换）
+output 输出
+
+pv 极向量
+Twist 扭曲
+Sub 次级
+Blend 混合（比如neckIkBend，常用在ikfk共存）
+Auto 自动
+Aim 目标约束
+Target 目标
+Rvs 反向连接
+
+Front   前面（fnt）
+Back   后面
+Left  左 （l）
+Right 右 （r）
+Up 上
+Down 下
