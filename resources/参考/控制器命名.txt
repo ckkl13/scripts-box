@@ -1,0 +1,33 @@
+头 head Ik
+头部单独旋转 headLocal
+脖子 neck IkBend
+锁骨 clavicle
+肩胛骨 scapula
+耸肩控制器 shrug
+胸腔 chest Ik
+脊椎ik旋转  spineikBend
+骨盆 pelvis Ik
+重心 cog
+盆骨单独旋转 pelvisLocal
+
+手ik   hand Ik    手臂极向量 elbowPvlk
+手臂fk  upperArm Fk      手肘fk elbow Fk    手腕fk wrist Fk
+
+手指  后面加Fk
+拇指掌骨 thumbMetacarpal   拇指根骨 thumbBase  拇指尖 thumbTip   拇指末端 thumbEnd
+食指掌骨 indexMetacarpal     食指根骨 indexBase    食指指中 indexMid 食指指尖 indexTid     食指末端 indexEnd
+中指掌骨 middleMetacarpal   中指根骨 middleBase  中指指中 middleMid 中指指尖 middleTid 中指末端 middleEnd
+无名指掌骨 ringMetacarpal    无名指根骨 ringBase    无名指指中 ringMid  无名指指尖 ringTid  无名指末端 ringEnd
+小拇指掌骨 pinkyMetacarpal    小拇指根骨 pinkyBase    小拇指指中 pinkyMid  小拇指指尖 pinkyTid  小拇指末端 pinkyEnd
+
+脚 foot lk    腿极向量 kneePvlk
+脚掌 ball lk
+脚尖 toe lk
+腿fk  upperLeg Fk    膝盖fk  knee Fk   脚fk ankle Fk  脚尖 ball Fk
+
+踮脚控制器 toePivot     脚后跟抬起控制器 heelPivot  脚向内旋转控制器  footlnnPivot        脚向外控制器 footOutPivot
+
+手臂ikfkblend     ArmIkFkBlend
+腿ikfkblend         leglkFkBlend
+
+
