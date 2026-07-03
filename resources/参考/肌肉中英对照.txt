@@ -1,0 +1,34 @@
+sternocleidomastoid: 胸锁乳突肌
+sternohyoid：胸骨舌骨肌
+pectoralis: 胸大肌
+trapezius：斜方肌
+latissimus dorsi: 背阔肌
+rectus abdominis: 腹直肌
+external oblique: 腹外斜肌
+
+infraspinatus：棘下肌
+teres major：大圆肌
+
+deltoid: 三角肌
+biceps brachii: 肱二头肌
+triceps brachii: 肱三头肌
+brachialis: 肱肌
+
+brachioradialis: 肱桡肌
+extensor carpi radialis longus: 桡侧腕长伸肌
+flexor carpi radialis: 桡侧腕屈肌
+
+gluteus maximus: 臀大肌
+gluteus medius: 臀中肌
+
+semimembranosus：半膜肌
+semitendinosus: 半腱肌
+biceps femoris: 股二头肌
+rectus femoris: 股直肌
+vastus lateralis: 股外侧肌
+addcutor longus: 内收长肌
+gracilis: 股薄肌
+
+extensor digitorum longus: 趾长伸肌
+gastrocnemius: 腓肠肌
+achilles tendon: 跟腱
